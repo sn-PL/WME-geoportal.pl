@@ -23,6 +23,7 @@
  */
 
 /* Changelog:
+ *  1.5.2 - New layer names address, streets WMS endpoint
  *  1.5.1 - Allow selective opacity sliders (checkbox-only for boundaries/addresses).
  *  1.5.0 - Release (WME March 2026 API Update):
  *          - Complete refactor into ES6 Classes.
@@ -216,10 +217,10 @@
         this.createWMSLayer("Geoportal - OSM", this.WMS_SERVICES.osm, "osm", "image/png");
       }
 
-      this.createWMSLayer("Geoportal - adresy", this.WMS_SERVICES.adresy, "prg-adresy", "image/png", { singleTile: false, minZ: 14, hasOpacity: false });
-      this.createWMSLayer("Geoportal - ulice", this.WMS_SERVICES.adresy, "prg-ulice", "image/png", { singleTile: false, minZ: 14, hasOpacity: false });
-      this.createWMSLayer("Geoportal - place", this.WMS_SERVICES.adresy, "prg-place", "image/png", { singleTile: false, minZ: 14, hasOpacity: false });
-      this.createWMSLayer("Geoportal - adresy, place i ulice w jednym", this.WMS_SERVICES.adresy, "prg-adresy,prg-place,prg-ulice", "image/png", { signleTile: false, minZ: 14, hasOpacity: false });
+      this.createWMSLayer("Geoportal - adresy", this.WMS_SERVICES.adresy, "A07_Punkty_adresowe", "image/png", { singleTile: false, minZ: 14, hasOpacity: false });
+      this.createWMSLayer("Geoportal - ulice", this.WMS_SERVICES.adresy, "A08_Ulice_Linie", "image/png", { singleTile: false, minZ: 14, hasOpacity: false });
+      this.createWMSLayer("Geoportal - place", this.WMS_SERVICES.adresy, "A08_Ulice_Powierzchnie", "image/png", { singleTile: false, minZ: 14, hasOpacity: false });
+      this.createWMSLayer("Geoportal - adresy, place i ulice w jednym", this.WMS_SERVICES.adresy, "A07_Punkty_adresowe,A08_Ulice_Powierzchnie,A08_Ulice_Linie", "image/png", { signleTile: false, minZ: 14, hasOpacity: false });
 
       this.createWMSLayer("Geoportal - przejazdy kolejowe (wymagany duży zoom)", this.WMS_SERVICES.rail, "PMT_Linie_Kolejowe_Sp__z_o_o_,Kopalnia_Piasku_KOTLARNIA_-_Linie_Kolejowe_Sp__z__o_o_,Jastrzębska_Spółka_Kolejowa_Sp__z_o_o_,Infra_SILESIA_S_A_,EUROTERMINAL_Sławków_Sp__z_o_o_,Dolnośląska_Służba_Dróg_i_Kolei_we_Wrocławiu,CARGOTOR_Sp__z_o_o_,PKP_SKM_w_Trójmieście_Sp__z_o_o_,PKP_Linia_Hutnicza_Szerokotorowa_Sp__z_o__o_,PKP_Polskie_Linie_Kolejowe", "image/png", { minZ: 15 });
       this.createWMSLayer("Geoportal - drogi", this.WMS_SERVICES.mileage, "planowane,wbudowie,pikietaz,drugorzedne,glowne,ekspresowe,autostrady", "image/png", { minZ: 12 });
