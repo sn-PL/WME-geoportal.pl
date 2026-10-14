@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# .githooks/post-checkout — enforce/update on branch checkout / clone
+# Args: $1=previous HEAD, $2=new HEAD, $3=1 if branch checkout else 0
+set -euo pipefail
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+# Only act on branch checkout (3rd arg == 1) to avoid noise on file checkout
+if [ "${3:-0}" = "1" ] && [ -f "$REPO_ROOT/scripts/update-wme-sdk-typings.sh" ]; then
+  if ! "$REPO_ROOT/scripts/update-wme-sdk-typings.sh" --check >/dev/null 2>&1; then
+    echo "[post-checkout] wme-sdk-typings.tgz outdated after branch switch."
+    echo "  Run: ./scripts/update-wme-sdk-typings.sh --verbose"
+  fi
+fi
