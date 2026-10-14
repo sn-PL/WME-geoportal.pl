@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+if [ -f "$REPO_ROOT/scripts/update-wme-sdk-typings.sh" ]; then
+  "$REPO_ROOT/scripts/update-wme-sdk-typings.sh" --check >/dev/null 2>&1 || { echo "⛔ Push blocked: wme-sdk-typings.tgz is outdated."; exit 1; }
+fi
+while read -r l_ref l_sha r_ref r_sha; do
+  [ "$l_sha" = "0000000000000000000000000000000000000000" ] && continue
+  RANGE="$([ "$r_sha" = "0000000000000000000000000000000000000000" ] && echo "HEAD~20..HEAD" || echo "$r_sha..$l_sha")"
+  git log "$RANGE" --pretty=format:"%an <%ae> %s %b" 2>/dev/null | grep -qE -i "(agent|bot|copilot|assistant|cowork|AI|arena-agent)" && { echo "⛔ Push blocked: Cowork/agent attribution detected."; exit 1; }
+done

@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# .githooks/pre-commit — block commit if typings are outdated
+set -euo pipefail
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+if [ -f "$REPO_ROOT/scripts/update-wme-sdk-typings.sh" ]; then
+  echo "[pre-commit] checking wme-sdk-typings.tgz freshness…"
+  if ! "$REPO_ROOT/scripts/update-wme-sdk-typings.sh" --check 2>&1; then
+    echo ""
+    echo "⛔ Commit blocked: wme-sdk-typings.tgz is outdated."
+    echo "   Run:  ./scripts/update-wme-sdk-typings.sh"
+    echo "         git add wme-sdk-typings.tgz"
+    echo "   Or bypass (not recommended): git commit --no-verify"
+    exit 1
+  fi
+fi
