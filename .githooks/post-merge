@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# .githooks/post-merge — after pull/merge, auto-update typings if remote changed
+set -euo pipefail
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+if [ -f "$REPO_ROOT/scripts/update-wme-sdk-typings.sh" ]; then
+  echo "[post-merge] checking for SDK updates…"
+  if ! "$REPO_ROOT/scripts/update-wme-sdk-typings.sh" --check >/dev/null 2>&1; then
+    echo "  → Remote SDK changed, updating local file…"
+    "$REPO_ROOT/scripts/update-wme-sdk-typings.sh" --verbose || true
+    # Stage hint (don't auto-commit, just notify)
+    if git -C "$REPO_ROOT" diff --quiet --exit-code -- wme-sdk-typings.tgz 2>/dev/null; then
+      :
+    else
+      echo "  ⚠ wme-sdk-typings.tgz updated. Run: git add wme-sdk-typings.tgz && git commit -m 'chore: update wme-sdk-typings'"
+    fi
+  fi
+fi
