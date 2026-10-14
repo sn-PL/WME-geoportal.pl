@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            Geoportal Waze integration (fork by snPL)
-// @version         1.5.3
-// @description     Adds geoportal.gov.pl overlays ("satellite view", house numbers, cities names) to WME (API March 2026)
+// @version         1.5.4
+// @description     Adds geoportal.gov.pl overlays ("satellite view", house numbers, cities names) to WME (SDK integration)
 // @include         https://*.waze.com/*/editor*
 // @include         https://*.waze.com/editor*
 // @include         https://*.waze.com/map-editor*
@@ -23,6 +23,7 @@
  */
 
 /* Changelog:
+ *  1.5.4 - Use SDK readiness, state and events; guard WMS and preserve the Layers menu.
  *  1.5.2 - New layer names address, streets WMS endpoint
  *  1.5.1 - Allow selective opacity sliders (checkbox-only for boundaries/addresses).
  *  1.5.0 - Release (WME March 2026 API Update):
@@ -44,13 +45,98 @@
 (function () {
   'use strict';
 
+  // The SDK exposes XYZ tiles, but not WMS/custom tile URL callbacks.
+  // Keep private WME/OpenLayers rendering access in this adapter only.
+  class WmsAdapter {
+    static connect() {
+      const OL = window.OpenLayers;
+      const mapWrapper = window.W?.map;
+      const map = typeof mapWrapper?.addLayer === 'function'
+        ? mapWrapper : (typeof mapWrapper?.getOLMap === 'function' ? mapWrapper.getOLMap() : null);
+      const methods = ['setVisibility', 'setOpacity', 'setZIndex', 'adjustBounds',
+        'getImageSize', 'getFullRequestString'];
+      if (typeof OL?.Projection !== 'function' || typeof OL?.Layer?.WMS !== 'function' ||
+          typeof OL?.Layer?.Grid?.prototype?.getFullRequestString !== 'function' ||
+          !methods.every(method => typeof OL.Layer.WMS.prototype[method] === 'function') ||
+          typeof map?.addLayer !== 'function') return null;
+      return new WmsAdapter(OL, map);
+    }
+
+    constructor(OL, map) {
+      this.OL = OL;
+      this.map = map;
+      this.sourceProjection = new OL.Projection("EPSG:900913");
+      this.targetProjection = new OL.Projection("EPSG:4326");
+    }
+
+    createLayer({ name, url, layers, format, options }, opacity, getZoom) {
+      const adapter = this;
+      const layer = new this.OL.Layer.WMS(name, url,
+        { layers, transparent: "true", format, version: "1.3.0" },
+        {
+          isBaseLayer: false, visibility: false,
+          singleTile: options.singleTile ?? true,
+          transitionEffect: "resize",
+          maxGetUrlRetries: 5,
+          getURL: function (bounds) {
+            if (getZoom() < (options.minZ ?? 0)) return null;
+            bounds = this.adjustBounds(bounds.clone());
+            const imageSize = this.getImageSize(bounds);
+            bounds.transform(adapter.sourceProjection, adapter.targetProjection);
+            // WMS 1.3.0 / EPSG:4326 uses latitude, longitude axis order.
+            return this.getFullRequestString({
+              BBOX: bounds.toArray(true), WIDTH: imageSize.w, HEIGHT: imageSize.h
+            });
+          },
+          getFullRequestString: function () {
+            this.params.CRS = "EPSG:4326";
+            return adapter.OL.Layer.Grid.prototype.getFullRequestString.apply(this, arguments);
+          }
+        });
+      layer.setOpacity(opacity);
+      this.map.addLayer(layer);
+      return layer;
+    }
+  }
+
+  // The SDK LayerSwitcher only offers flat checkboxes, not our categories/sliders.
+  // Isolate private markup here so a WME UI change needs only one compatibility fix.
+  class LayerMenuAdapter {
+    static findList() {
+      for (const selector of ['#layer-switcher-region', '.layer-switcher', '#sidepanel-layers']) {
+        const root = document.querySelector(selector);
+        const list = root?.querySelector('.menu .list-unstyled') || root?.querySelector('.list-unstyled');
+        if (list) return list;
+      }
+      return null;
+    }
+
+    static createCheckbox(name, checked, onChange) {
+      const checkbox = document.createElement('wz-checkbox');
+      checkbox.appendChild(document.createTextNode(name));
+      checkbox.checked = checked;
+      const changed = () => {
+        // Read the host after its own click handler, not a retargeted inner input.
+        // Some WME versions emit change, others only click. Deduplicate both.
+        queueMicrotask(() => {
+          const value = checkbox.checked;
+          if (typeof value === 'boolean') onChange(value);
+        });
+      };
+      checkbox.addEventListener('change', changed);
+      checkbox.addEventListener('click', changed);
+      return checkbox;
+    }
+  }
+
   class GeoportalIntegration {
     constructor() {
-      this.ver = "1.5.1";
+      this.ver = "1.5.4";
       this.layers = {};
       this.settingsKey = 'wme_geoportal_settings';
       this.settings = this.loadSettings();
-      this.uiInjected = false;
+      this.initializing = false;
+      this.initialized = false;
 
       this.WMS_SERVICES = {
         orto: "https://mapy.geoportal.gov.pl/wss/service/PZGIK/ORTO/WMS/StandardResolution?",
@@ -76,9 +162,6 @@
           "BDOT - Autostrada", "BDOT - Numer drogi"
         ]
       };
-
-      this.epsg900913 = new window.OpenLayers.Projection("EPSG:900913");
-      this.epsg4326 = new window.OpenLayers.Projection("EPSG:4326");
 
       this.init();
     }
@@ -115,26 +198,94 @@
 
     init() {
       this.log(`Version ${this.ver} initialization started`);
-      this.bootstrap();
+      this.bootstrap().catch(error => {
+        console.error('[Geoportal] Initialization stopped:', error);
+      });
     }
 
-    bootstrap(retries = 0) {
-      if (retries > 60) {
-        this.log("WME failed to initialize in a reasonable time.");
-        return;
+    async waitFor(getValue, description) {
+      let timeout, retry;
+      try {
+        return await Promise.race([
+          new Promise((resolve, reject) => {
+            const poll = () => {
+              try {
+                const value = getValue();
+                if (value) resolve(value); // Also waits for SDK_INITIALIZED's promise.
+                else retry = setTimeout(poll, 1000);
+              } catch (error) { reject(error); }
+            };
+            poll();
+          }),
+          new Promise((resolve, reject) => {
+            timeout = setTimeout(() => reject(new Error(
+              `Timed out waiting for ${description}. Reload WME or update the script.`
+            )), 120000);
+          })
+        ]);
+      } finally {
+        clearTimeout(timeout);
+        clearTimeout(retry);
       }
+    }
 
-      const W = window.W;
-      if (typeof W === 'undefined' || !W.map || !W.loginManager || !W.loginManager.user || !document.querySelector('#layer-switcher-region')) {
-        setTimeout(() => this.bootstrap(retries + 1), 1000);
-        return;
+    async bootstrap() {
+      if (this.initializing || this.initialized) return;
+      this.initializing = true;
+      // SDK_INITIALIZED may not exist yet when the userscript first runs.
+      await this.waitFor(() => window.SDK_INITIALIZED, 'the WME SDK');
+      await this.waitFor(() => typeof window.getWmeSdk === 'function', 'getWmeSdk');
+      this.sdk = await window.getWmeSdk({
+        scriptId: 'wme-geoportal-pl',
+        scriptName: 'Geoportal Waze integration'
+      });
+      const required = {
+        State: ['isReady', 'getUserInfo'],
+        Map: ['getZoomLevel'],
+        Events: ['on']
+      };
+      for (const [module, methods] of Object.entries(required)) {
+        for (const method of methods) {
+          if (typeof this.sdk?.[module]?.[method] !== 'function') {
+            throw new Error(`Required WME SDK method missing: ${module}.${method}. Update the script.`);
+          }
+        }
       }
+      // Register first so readiness cannot be missed between the check and subscription.
+      let signalReady;
+      const ready = new Promise(resolve => { signalReady = resolve; });
+      const unsubscribe = this.sdk.Events.on({ eventName: 'wme-ready', eventHandler: signalReady });
+      try {
+        if (!await this.sdk.State.isReady()) await this.waitFor(() => ready, 'WME readiness');
+      } finally {
+        if (typeof unsubscribe === 'function') unsubscribe();
+      }
+      this.user = await this.sdk.State.getUserInfo();
+      const zoom = this.sdk.Map.getZoomLevel();
+      this.zoom = await zoom;
+      // Tile requests can precede SDK zoom events. Read the synchronous API
+      // directly; only an asynchronous SDK needs the event-updated cache.
+      this.getZoom = typeof zoom === 'number'
+        ? () => this.sdk.Map.getZoomLevel() : () => this.zoom;
+      this.wms = await this.waitFor(() => WmsAdapter.connect(), 'the legacy WMS renderer');
 
+      // Wait for component registration before setting checked (avoids shadowing
+      // the custom element's setter when the layer card loads late).
+      await this.waitFor(() => window.customElements?.get('wz-checkbox'), 'WME checkboxes');
       this.setupUI();
       this.createLayersDefinition();
-      this.injectUI();
-      this.startZIndexMonitor();
       this.startMutationObserver();
+      this.injectUI();
+      const refresh = () => this.refreshLayers().catch(error => {
+        console.error('[Geoportal] Could not refresh WMS layers:', error);
+      });
+      this.sdk.Events.on({ eventName: 'wme-map-zoom-changed', eventHandler: refresh });
+      this.sdk.Events.on({ eventName: 'wme-map-move-end', eventHandler: refresh });
+      this.sdk.Events.on({ eventName: 'wme-map-layer-changed', eventHandler: () => this.fixZIndex() });
+      await this.refreshLayers();
+      this.startZIndexMonitor();
+      this.initialized = true;
+      this.log('Initialization complete (WME SDK)');
     }
 
     setupUI() {
@@ -208,7 +359,7 @@
     }
 
     createLayersDefinition() {
-      const usrRank = window.W.loginManager.user.getRank();
+      const usrRank = this.user?.rank ?? 0;
 
       this.createWMSLayer("Geoportal - ortofoto", this.WMS_SERVICES.orto, "Raster", "image/jpeg", { singleTile: false, minZ: 0 });
       this.createWMSLayer("Geoportal - ortofoto high res", this.WMS_SERVICES.orto_high, "Raster", "image/jpeg", { singleTile: false, minZ: 14 });
@@ -251,53 +402,25 @@
     }
 
     createWMSLayer(name, url, layers, format = "image/png", options = {}) {
-      const self = this;
-      const getUrlAsEpsg4326 = function (bounds) {
-        const currentZoom = window.W.map.getZoom();
-        if (options.minZ !== undefined && currentZoom < options.minZ) return null;
-        bounds = bounds.clone();
-        bounds = this.adjustBounds(bounds);
-        const imageSize = this.getImageSize(bounds);
-        bounds.transform(self.epsg900913, self.epsg4326);
-        const newParams = { BBOX: bounds.toArray(true), WIDTH: imageSize.w, HEIGHT: imageSize.h };
-        return this.getFullRequestString(newParams);
-      };
-      const setEpsg4326 = function (newParams) {
-        this.params.CRS = "EPSG:4326";
-        return window.OpenLayers.Layer.Grid.prototype.getFullRequestString.apply(this, arguments);
-      };
+      const integration = this;
       this.layers[name] = {
         definition: { name, url, layers, format, options },
         hasOpacity: options.hasOpacity !== false,
         instance: null,
         opacity: this.settings.layerOpacity[name] ?? 1.0,
         isEnabled: this.settings.enabledLayers[name] ?? false,
-        getInstance: function () {
-          if (!this.instance) {
-            this.instance = new window.OpenLayers.Layer.WMS(
-              name, url,
-              { layers, transparent: "true", format, version: "1.3.0" },
-              {
-                isBaseLayer: false, visibility: false,
-                singleTile: options.singleTile ?? true,
-                transitionEffect: "resize",
-                getURL: getUrlAsEpsg4326,
-		maxGetUrlRetries: 5,
-                getFullRequestString: setEpsg4326
-              }
-            );
-            this.instance.setOpacity(this.opacity);
-            window.W.map.addLayer(this.instance);
+        updateVisibility: function () {
+          const visible = this.isEnabled && integration.zoom >= (options.minZ ?? 0);
+          if (visible && !this.instance) {
+            this.instance = integration.wms.createLayer(this.definition, this.opacity,
+              integration.getZoom);
           }
-          return this.instance;
+          if (this.instance) this.instance.setVisibility(visible);
         },
         setVisibility: function (visible) {
           this.isEnabled = visible;
-          if (visible) {
-            this.getInstance().setVisibility(true);
-          } else if (this.instance) {
-            this.instance.setVisibility(false);
-          }
+          this.updateVisibility();
+          integration.fixZIndex();
         },
         setOpacity: function (val) {
           this.opacity = val;
@@ -308,21 +431,18 @@
     }
 
     injectUI() {
-      let list = document.querySelector('#layer-switcher-region .menu .list-unstyled') ||
-        document.querySelector('.layer-switcher .menu .list-unstyled') ||
-        document.querySelector('#sidepanel-layers .menu .list-unstyled');
+      const list = LayerMenuAdapter.findList();
       if (!list) return;
-
-      let groupLi = document.getElementById('geoportal-layers-group');
-      if (groupLi) {
-        if (this.uiInjected) return;
-        groupLi.innerHTML = '';
-      } else {
-        groupLi = document.createElement('li');
-        groupLi.id = 'geoportal-layers-group';
-        groupLi.className = 'group';
-        list.appendChild(groupLi);
+      // Reattach the same controls if WME replaces the entire layer card.
+      if (this.uiGroup) {
+        if (this.uiGroup.parentNode !== list) list.appendChild(this.uiGroup);
+        return;
       }
+      const groupLi = document.createElement('li');
+      groupLi.id = 'geoportal-layers-group';
+      groupLi.className = 'group';
+      this.uiGroup = groupLi;
+      list.appendChild(groupLi);
 
       const header = document.createElement('div');
       header.className = 'geoportal-separator';
@@ -354,15 +474,10 @@
         groupLi.appendChild(catDiv);
       });
 
-      Object.keys(this.layers).forEach(name => {
-        if (this.layers[name].isEnabled) this.layers[name].setVisibility(true);
-      });
-
       const info = document.createElement('div');
       info.className = 'geoportal-info';
       info.innerText = "Increasing opacity enables the layer.\nHides automatically at low zoom.";
       groupLi.appendChild(info);
-      this.uiInjected = true;
     }
 
     createUIItem(lName) {
@@ -371,11 +486,9 @@
       item.className = 'geoportal-layer-item';
       const control = document.createElement('div');
       control.className = 'geoportal-layer-control';
-      const checkbox = document.createElement('wz-checkbox');
-      checkbox.appendChild(document.createTextNode(lName));
-      checkbox.checked = lData.isEnabled;
-      checkbox.addEventListener('change', (e) => {
-        lData.setVisibility(e.target.checked);
+      const checkbox = LayerMenuAdapter.createCheckbox(lName, lData.isEnabled, checked => {
+        if (checked === lData.isEnabled) return;
+        lData.setVisibility(checked);
         this.saveSettings();
       });
       control.appendChild(checkbox);
@@ -406,50 +519,41 @@
       item.appendChild(control); return item;
     }
 
-    startZIndexMonitor() {
-      const fixZIndex = () => {
-        Object.values(this.layers).forEach(lData => {
-          if (lData.instance && lData.isEnabled) lData.instance.setZIndex(2050);
-        });
-      };
-      const throttled = window._ ? window._.throttle(fixZIndex, 1000) : fixZIndex;
-      window.W.map.events.register("moveend", window.W.map, throttled);
-      window.W.map.events.register("changelayer", window.W.map, throttled);
-      setInterval(fixZIndex, 5000);
+    async refreshLayers() {
+      const request = this.refreshRequest = (this.refreshRequest || 0) + 1;
+      // The current SDK returns a number: do not defer zoom filtering until a
+      // microtask, since OpenLayers can request tiles in the same event cycle.
+      const result = this.sdk.Map.getZoomLevel();
+      const zoom = typeof result === 'number' ? result : await result;
+      if (request !== this.refreshRequest) return;
+      this.zoom = zoom;
+      Object.values(this.layers).forEach(layer => layer.updateVisibility());
+      this.fixZIndex();
+    }
+
+    fixZIndex() {
+      let currentZIndex = 2040;
+      Object.values(this.layers).forEach(layer => {
+        if (layer.instance && layer.isEnabled) layer.instance.setZIndex(currentZIndex++);
+      });
     }
 
     startZIndexMonitor() {
-      const fixZIndex = () => {
-        let currentZIndex = 2040; // Bazowa wartość z-index
-        Object.values(this.layers).forEach(lData => {
-          if (lData.instance && lData.isEnabled) {
-            // Każda kolejna warstwa zyskuje wyższy z-index
-            lData.instance.setZIndex(currentZIndex++);
-          }
-        });
-      };
-      const throttled = window._ ? window._.throttle(fixZIndex, 1000) : fixZIndex;
-      window.W.map.events.register("moveend", window.W.map, throttled);
-      window.W.map.events.register("changelayer", window.W.map, throttled);
-      setInterval(fixZIndex, 5000);
+      // WME can reorder its own layers without moving the map.
+      this.zIndexTimer = setInterval(() => this.fixZIndex(), 5000);
     }
-
 
     startMutationObserver() {
-      const observer = new MutationObserver((mutations) => {
-        for (const mutation of mutations) {
-          if (mutation.type === 'childList') {
-            const list = document.querySelector('#layer-switcher-region .menu .list-unstyled') ||
-              document.querySelector('.layer-switcher .menu .list-unstyled') ||
-              document.querySelector('#sidepanel-layers .menu .list-unstyled');
-            if (list && !document.getElementById('geoportal-layers-group')) {
-              this.uiInjected = false; this.injectUI();
-            }
-          }
-        }
+      // Observe a stable ancestor: the card itself may be absent or replaced.
+      // Coalesce mutations and ignore slider/text changes inside our own group.
+      this.uiObserver = new MutationObserver(mutations => {
+        if (this.uiTimer || !mutations.some(m => !this.uiGroup?.contains(m.target))) return;
+        this.uiTimer = setTimeout(() => {
+          this.uiTimer = null;
+          this.injectUI();
+        }, 100);
       });
-      const container = document.querySelector('#layer-switcher-region') || document.querySelector('.layer-switcher');
-      if (container) observer.observe(container, { childList: true, subtree: true });
+      this.uiObserver.observe(document.body, { childList: true, subtree: true });
     }
   }
 
