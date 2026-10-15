@@ -23,7 +23,7 @@
  */
 
 /* Changelog:
- *  1.6.0 - OSM, the standard photo layer, the level crossings and the topographic objects come as tiles of the editor's own map, because those services refuse a whole-window picture; the crossings and the detailed BDOT switches ask in EPSG:2180, the system those services draw in - asked in 4326 they answer with a picture of their own error instead of the data (drawn into the image, because OpenLayers asks a WMS for INIMAGE exceptions); every service is now asked for its errors as documents instead of pictures, so a failure leaves a hole in the layer instead of a grey plate of text on the map; the overlays drawn in thin dark lines ("Topografia / Inne") get a white halo and a lift of brightness instead of an opacity slider, and so do the BDOT switches; and no view picture is asked for past about a megapixel.
+ *  1.6.0 - OSM, the standard photo layer, the level crossings and the topographic objects come as tiles of the editor's own map, because those services refuse a whole-window picture; the crossings and the detailed BDOT switches ask in EPSG:2180, the system those services draw in - asked in 4326 they answer with a picture of their own error instead of the data (drawn into the image, because OpenLayers asks a WMS for INIMAGE exceptions); every service is now asked for its errors as documents instead of pictures, so a failure leaves a hole in the layer instead of a grey plate of text on the map; the overlays drawn in thin dark lines ("Topografia / Inne") get a white halo and a lift of brightness instead of an opacity slider, and so do the BDOT switches; no view picture is asked for past about a megapixel, and a setting that cannot be read no longer stops the script.
  *  1.5.5 - WME SDK v2.374: async SDK mode; version-tolerant startup, events, zoom filtering and controls; photo layers request JPEG without the needless transparency flag, as one image per view instead of a tile grid (the ortho WMS answers whole tile batches with 404); a refused image is requested three times - once immediately, then twice at a growing distance - and a view image that OpenLayers gave up on is requested again instead of leaving the map empty.
  *  1.5.4 - Use SDK readiness, state and events; guard WMS and preserve the Layers menu.
  *  1.5.2 - New layer names address, streets WMS endpoint
@@ -412,7 +412,8 @@
       const pixels = size.w * size.h;
       if (pixels <= MAX_VIEW_PIXELS) return size;
       const shrink = Math.sqrt(MAX_VIEW_PIXELS / pixels);
-      return { w: Math.round(size.w * shrink), h: Math.round(size.h * shrink) };
+      // Rounded down, so that rounding can never put the request past the cap.
+      return { w: Math.floor(size.w * shrink), h: Math.floor(size.h * shrink) };
     }
 
     createLayer(definition, opacity) {
@@ -780,21 +781,34 @@
     }
 
     loadSettings() {
-      const saved = localStorage.getItem(this.settingsKey);
+      // Whatever is stored may be unreadable - a half-written value, a value left
+      // by something else under the same key - and the script has to start anyway.
+      /** @type {{enabledLayers: Record<string, boolean>, layerOpacity: Record<string, number>, collapsedCats: Record<string, boolean>}} */
       const defaults = {
         enabledLayers: { "Geoportal - adresy": true },
         layerOpacity: {},
         collapsedCats: {}
       };
-      const settings = saved ? JSON.parse(saved) : defaults;
-      settings.enabledLayers = settings.enabledLayers || {};
-      settings.layerOpacity = settings.layerOpacity || {};
-      settings.collapsedCats = settings.collapsedCats || {};
+      let settings = defaults;
+      try {
+        const saved = localStorage.getItem(this.settingsKey);
+        const parsed = saved ? JSON.parse(saved) : null;
+        if (parsed && typeof parsed === 'object') settings = parsed;
+      } catch (error) {
+        console.warn('[Geoportal] Saved settings could not be read, using the defaults:', error);
+      }
+      const section = name => {
+        const value = settings[name];
+        if (!value || typeof value !== 'object') settings[name] = defaults[name];
+      };
+      ['enabledLayers', 'layerOpacity', 'collapsedCats'].forEach(section);
       return settings;
     }
 
     saveSettings() {
+      /** @type {Record<string, boolean>} */
       const enabledLayers = {};
+      /** @type {Record<string, number>} */
       const layerOpacity = {};
       Object.keys(this.layers).forEach(name => {
         enabledLayers[name] = this.layers[name].isEnabled;
@@ -1154,5 +1168,14 @@
     }
   }
 
-  new GeoportalIntegration();
+  const geoportal = new GeoportalIntegration();
+  // Handle on the script, for the editor's console and for the tests in test/:
+  // the layer list as built, and the transformations it uses. Nothing reads it
+  // back, so removing this line only takes the tests and the console view away.
+  /** @type {any} */ (window).__geoportalPl = Object.assign(geoportal, {
+    internals: {
+      VERSION: SCRIPT_VERSION, to2180, bounds2180, BDOT_LAYERS, PUWG,
+      MAX_VIEW_PIXELS, IMAGE_RETRY_DELAYS, TILE_MAX_ZOOM, HALO_FILTER, Z_INDEX_BASE
+    }
+  });
 })();

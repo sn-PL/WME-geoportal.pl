@@ -16,6 +16,7 @@ Na podstawie skryptu [geoportal.gov.pl layers for WME without translating PROXY]
 
 * Warstwy BDOT10k, obiekty topograficzne i przejazdy kolejowe są rysowane w układzie 1992 (PUWG 1992) i mają dane tylko tam, gdzie publikuje je kompozycja BDOT10k, powiat (obiekty topograficzne) albo operator linii kolejowej.
 * Skrypt opiera się na WME SDK oraz na OpenLayers i prywatnym DOM menu Warstwy; przyszłe zmiany WME mogą wymagać aktualizacji (komunikaty `[Geoportal]` w konsoli przeglądarki).
+* Testy skryptu (jsdom + prawdziwy OpenLayers 2.13.1 + atrapa WME SDK) są w katalogu `test/` — `cd test && npm install && npm test`.
 
 ## Changelog [1.6.0] - 2026-10-15
 
