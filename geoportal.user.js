@@ -23,6 +23,7 @@
  */
 
 /* Changelog:
+ *  1.5.9 - "Geoportal - OSM" comes from the OSM tile service as the editor's own z/x/y tiles instead of one image per view; the level crossings (Przejazdy) and the detailed BDOT layers come as tiles too, because those services refuse a whole-view render; the topographic objects (Krajowa Integracja BDOT) are requested in EPSG:2180, the only system the county services behind that integration answer in; the eight detailed BDOT layers (all of them road surface classes) are two layers - roads and road numbers - from zoom 17 up.
  *  1.5.5 - WME SDK v2.374: async SDK mode; version-tolerant startup, events, zoom filtering and controls; photo layers request JPEG without the needless transparency flag, as one image per view instead of a tile grid (the ortho WMS answers whole tile batches with 404); a refused image is requested three times - once immediately, then twice at a growing distance - and a view image that OpenLayers gave up on is requested again instead of leaving the map empty.
  *  1.5.4 - Use SDK readiness, state and events; guard WMS and preserve the Layers menu.
  *  1.5.2 - New layer names address, streets WMS endpoint
@@ -46,18 +47,19 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = "1.5.8";
+  const SCRIPT_VERSION = "1.5.9";
   // WME SDK typings this version was checked against (wme-sdk-typings.tgz).
   const SDK_BASELINE = "v2.374-5-g0024d1fa65";
   const WAIT_TIMEOUT = 120000;
   const CHECKBOX_TIMEOUT = 30000;
   // Enabled overlays are stacked upwards from this z-index, in definition order.
   const Z_INDEX_BASE = 2040;
-  // The Geoportal serves the standard ortho in the editor's own tile grid: Web
-  // Mercator EPSG:3857, 256 px tiles, levels 0-19, the same z/x/y tiles the map
-  // is drawn from. Above level 19 there are no tiles, so OpenLayers keeps asking
-  // for level 19 and stretches it - which is the detail the data has anyway.
-  const ORTO_TILE_MAX_ZOOM = 19;
+  // The Geoportal serves the standard ortho and the OSM base map in the editor's
+  // own tile grid: Web Mercator EPSG:3857, 256 px tiles, levels 0-19, the same
+  // z/x/y tiles the map is drawn from. Above level 19 there are no tiles, so
+  // OpenLayers keeps asking for level 19 and stretches it - which is the detail
+  // the data has anyway.
+  const TILE_MAX_ZOOM = 19;
   // Resolution of a 256 px Web Mercator tile at level 0 (the whole world).
   const MERCATOR_WORLD_RESOLUTION = 156543.03392804097;
   // The script cannot work without these SDK methods; everything else is optional.
@@ -72,6 +74,74 @@
   // are the delays (ms) of the ones after it - past the burst that the front-end
   // refuses, and with a fresh timestamp so the answer cannot come from a cache.
   const IMAGE_RETRY_DELAYS = [1000, 3000];
+  // Geodetic constants of EPSG:2180 (PUWG 1992): GRS80, transverse Mercator with
+  // the scale factor 0.9993, central meridian 19°E and the usual false origin.
+  const PUWG = { a: 6378137, f: 1 / 298.257222101, k0: 0.9993, meridian: 19, falseEasting: 500000, falseNorthing: -5300000 };
+
+  /**
+   * A WGS84 point in EPSG:2180 - the series proj uses, to the millimetre.
+   *
+   * The topographic objects ("obiekty topograficzne") have to be asked for in
+   * this system: the service is an integration that forwards every request to the
+   * WMS of the county the request covers, and those county services answer in
+   * EPSG:2180 alone - a GetMap in 4326 or 3857 comes back as an empty image
+   * wherever the country is asked. The system is a transverse Mercator on GRS80,
+   * so the transform is a closed series and needs no projection library.
+   * @param {number} lon longitude in degrees
+   * @param {number} lat latitude in degrees
+   * @returns {{ easting: number, northing: number }} metres
+   */
+  function to2180(lon, lat) {
+    const { a, f, k0, meridian, falseEasting, falseNorthing } = PUWG;
+    const n = f / (2 - f);
+    const bigA = a / (1 + n) * (1 + n * n / 4 + Math.pow(n, 4) / 64);
+    const alpha = [
+      n / 2 - 2 * n * n / 3 + 5 * Math.pow(n, 3) / 16,
+      13 * n * n / 48 - 3 * Math.pow(n, 3) / 5,
+      61 * Math.pow(n, 3) / 240
+    ];
+    const factor = 2 * Math.sqrt(n) / (1 + n);
+    const phi = lat * Math.PI / 180;
+    const lam = (lon - meridian) * Math.PI / 180;
+    const t = Math.sinh(Math.atanh(Math.sin(phi)) - factor * Math.atanh(factor * Math.sin(phi)));
+    const xi = Math.atan2(t, Math.cos(lam));
+    const eta = Math.atanh(Math.sin(lam) / Math.sqrt(1 + t * t));
+    let easting = 0, northing = 0;
+    for (let j = 1; j <= 3; j++) {
+      easting += alpha[j - 1] * Math.cos(2 * j * xi) * Math.sinh(2 * j * eta);
+      northing += alpha[j - 1] * Math.sin(2 * j * xi) * Math.cosh(2 * j * eta);
+    }
+    return {
+      easting: falseEasting + k0 * bigA * (eta + easting),
+      northing: falseNorthing + k0 * bigA * (xi + northing)
+    };
+  }
+
+  /**
+   * WGS84 bounds as the BBOX of a WMS 1.3.0 request in EPSG:2180. The service
+   * behind that integration reads the two numbers of a corner as northing,
+   * easting, and the cell of a tile is small enough for the bounding rectangle
+   * of its four corners to be the tile itself.
+   * @param {any} bounds WGS84 bounds (lon/lat)
+   * @returns {number[]} BBOX as northing, easting, northing, easting
+   */
+  function bounds2180(bounds) {
+    const corners = [
+      [bounds.left, bounds.bottom], [bounds.left, bounds.top],
+      [bounds.right, bounds.bottom], [bounds.right, bounds.top]
+    ];
+    let minE = Infinity, minN = Infinity, maxE = -Infinity, maxN = -Infinity;
+    corners.forEach(([lon, lat]) => {
+      const point = to2180(lon, lat);
+      minE = Math.min(minE, point.easting);
+      maxE = Math.max(maxE, point.easting);
+      minN = Math.min(minN, point.northing);
+      maxN = Math.max(maxN, point.northing);
+    });
+    // Centimetres are far below what the data and the pixels can tell apart.
+    const round = value => Math.round(value * 100) / 100;
+    return [round(minN), round(minE), round(maxN), round(maxE)];
+  }
 
   /** @typedef {import('wme-sdk-typings').AsyncWmeSDK} AsyncWmeSDK */
   /** @typedef {Parameters<import('wme-sdk-typings').WmeSDK['Events']['on']>[0]['eventName']} SdkEventName */
@@ -313,6 +383,10 @@
       const adapter = this;
       const minZoom = options.minZ ?? 0;
       const singleTile = options.singleTile ?? true;
+      // The system of the request. Everything the map itself can speak is asked
+      // for in EPSG:4326; the topographic objects need the system of the county
+      // services behind their integration (see to2180).
+      const crs = options.crs ?? "EPSG:4326";
       // State of this layer's image recovery, shared with retryMissingImage.
       const recovery = { tried: 0, timer: null, stamp: null, holding: false };
       // The photo layers are opaque mosaics: transparency is a contradiction there
@@ -332,15 +406,19 @@
             const imageSize = this.getImageSize(bounds);
             if (adapter.zoomAt((bounds.right - bounds.left) / imageSize.w) < minZoom) return null;
             bounds.transform(adapter.sourceProjection, adapter.targetProjection);
-            // WMS 1.3.0 / EPSG:4326 uses latitude, longitude axis order. As long as
+            // WMS 1.3.0 / EPSG:4326 uses latitude, longitude axis order, while the
+            // integrating service reads EPSG:2180 as northing, easting. As long as
             // the view image is missing, every request asks under a fresh address,
             // so no cache can answer it with the refused response.
-            const request = { BBOX: bounds.toArray(true), WIDTH: imageSize.w, HEIGHT: imageSize.h };
+            const request = {
+              BBOX: crs === "EPSG:2180" ? bounds2180(bounds) : bounds.toArray(true),
+              WIDTH: imageSize.w, HEIGHT: imageSize.h
+            };
             if (recovery.stamp) request._ = recovery.stamp;
             return this.getFullRequestString(request);
           },
           getFullRequestString: function () {
-            this.params.CRS = "EPSG:4326";
+            this.params.CRS = crs;
             return adapter.OL.Layer.Grid.prototype.getFullRequestString.apply(this, arguments);
           },
           // OpenLayers drops its back buffer - the image the layer is showing -
@@ -380,7 +458,7 @@
     createTileLayer({ name, url, options }, opacity) {
       const adapter = this;
       const minZoom = options.minZ ?? 0;
-      const maxZoom = Math.min(options.maxZ ?? ORTO_TILE_MAX_ZOOM, ORTO_TILE_MAX_ZOOM);
+      const maxZoom = Math.min(options.maxZ ?? TILE_MAX_ZOOM, TILE_MAX_ZOOM);
       // State of this layer's image recovery, shared with retryMissingImage.
       const recovery = { tried: 0, timer: null, stamp: null, holding: false };
       // The service's levels as resolutions of the standard grid, i.e. the same
@@ -603,7 +681,6 @@
 
       this.WMS_SERVICES = {
         orto_high: "https://mapy.geoportal.gov.pl/wss/service/PZGIK/ORTO/WMS/HighResolution?",
-        osm: "https://mapy.geoportal.gov.pl/wss/ext/OSM/BaseMap/service?",
         adresy: "https://mapy.geoportal.gov.pl/wss/ext/KrajowaIntegracjaNumeracjiAdresowej?request=GetMap&",
         rail: "https://mapy.geoportal.gov.pl/wss/service/sdi/Przejazdy/get?REQUEST=GetMap&",
         mileage: "https://mapy.geoportal.gov.pl/wss/ext/OSM/SiecDrogowaOSM?",
@@ -613,14 +690,21 @@
         kompozycja: "https://mapy.geoportal.gov.pl/wss/service/pub/guest/kompozycja_BDOT10k_WMS/MapServer/WMSServer"
       };
 
-      // The standard ortho as tiles of the editor's own grid. The service has one
-      // Web Mercator matrix set (EPSG:3857, 256 px, levels 0-19) whose indices are
-      // the ordinary z/x/y of that grid, so these are literally the tiles the map
-      // is built from - a refused one is a hole, not a blank photo layer.
+      // The standard ortho and the OSM base map as tiles of the editor's own grid.
+      // Both services have one Web Mercator matrix set (EPSG:3857, 256 px, levels
+      // 0-19) whose indices are the ordinary z/x/y of that grid, so these are
+      // literally the tiles the map is built from - a refused one is a hole, not a
+      // blank photo layer.
       this.TILE_SERVICES = {
         orto: "https://mapy.geoportal.gov.pl/wss/service/PZGIK/ORTO/WMTS/StandardResolution?" +
           "SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ORTOFOTOMAPA&STYLE=default&FORMAT=image/jpeg" +
-          "&TILEMATRIXSET=EPSG:3857&TILEMATRIX=EPSG:3857:${z}&TILEROW=${y}&TILECOL=${x}"
+          "&TILEMATRIXSET=EPSG:3857&TILEMATRIX=EPSG:3857:${z}&TILEROW=${y}&TILECOL=${x}",
+        // One address for two services: this is its tile face, while its WMS face
+        // ("osm" in EPSG:4326) rendered a whole view per request and was never
+        // cacheable - the tiles carry an ETag and a three-day max-age.
+        osm: "https://mapy.geoportal.gov.pl/wss/ext/OSM/BaseMap/service?" +
+          "SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=osm_3857&STYLE=default&FORMAT=image/png" +
+          "&TILEMATRIXSET=GLOBAL_WEBMERCATOR&TILEMATRIX=${z}&TILEROW=${y}&TILECOL=${x}"
       };
 
       this.CATEGORIES = {
@@ -628,11 +712,7 @@
         "Adresy i Ulice": ["Geoportal - adresy", "Geoportal - ulice", "Geoportal - place", "Geoportal - adresy, place i ulice w jednym"],
         "Podział Administracyjny": ["Geoportal - podział adm", "Geoportal - Miasta", "Geoportal - gminy", "Geoportal - powiaty", "Geoportal - województwa", "Geoportal - Granica PL"],
         "Topografia / Inne": ["Geoportal - drogi", "Geoportal - przejazdy kolejowe (wymagany duży zoom)", "Geoportal - obiekty topograficzne"],
-        "BDOT (Szczegółowa)": [
-          "BDOT - Gruntowa", "BDOT - Utwardzona", "BDOT - Twarda", "BDOT - Główna",
-          "BDOT - W budowie (Ekspr./Główna)", "BDOT - Jezdnia (Ekspr./Główna)",
-          "BDOT - Autostrada", "BDOT - Numer drogi"
-        ]
+        "BDOT (Szczegółowa)": ["BDOT - drogi (szczegółowe)", "BDOT - numer drogi"]
       };
 
       this.init();
@@ -798,11 +878,13 @@
       // tiles the map draws, levels 0-19), the high-res ortho cut into that grid
       // on the client, because its service publishes no such tiles. A refused tile
       // is one hole in the view, with the editor's base map behind it.
-      this.createTileLayer("Geoportal - ortofoto", this.TILE_SERVICES.orto, { maxZ: ORTO_TILE_MAX_ZOOM });
+      this.createTileLayer("Geoportal - ortofoto", this.TILE_SERVICES.orto, { maxZ: TILE_MAX_ZOOM });
       this.createWMSLayer("Geoportal - ortofoto high res", this.WMS_SERVICES.orto_high, "Raster", "image/jpeg", { singleTile: false, minZ: 14 });
 
       if (usrRank >= 1) {
-        this.createWMSLayer("Geoportal - OSM", this.WMS_SERVICES.osm, "osm", "image/png");
+        // The OSM base map is a picture of the whole map, like the ortho, and its
+        // service publishes it as the tiles of the same Web Mercator grid.
+        this.createTileLayer("Geoportal - OSM", this.TILE_SERVICES.osm, { maxZ: TILE_MAX_ZOOM });
       }
 
       this.createWMSLayer("Geoportal - adresy", this.WMS_SERVICES.adresy, "A07_Punkty_adresowe", "image/png", { singleTile: false, minZ: 14, hasOpacity: false });
@@ -810,7 +892,12 @@
       this.createWMSLayer("Geoportal - place", this.WMS_SERVICES.adresy, "A08_Ulice_Powierzchnie", "image/png", { singleTile: false, minZ: 14, hasOpacity: false });
       this.createWMSLayer("Geoportal - adresy, place i ulice w jednym", this.WMS_SERVICES.adresy, "A07_Punkty_adresowe,A08_Ulice_Powierzchnie,A08_Ulice_Linie", "image/png", { singleTile: false, minZ: 14, hasOpacity: false });
 
-      this.createWMSLayer("Geoportal - przejazdy kolejowe (wymagany duży zoom)", this.WMS_SERVICES.rail, "PMT_Linie_Kolejowe_Sp__z_o_o_,Kopalnia_Piasku_KOTLARNIA_-_Linie_Kolejowe_Sp__z__o_o_,Jastrzębska_Spółka_Kolejowa_Sp__z_o_o_,Infra_SILESIA_S_A_,EUROTERMINAL_Sławków_Sp__z_o_o_,Dolnośląska_Służba_Dróg_i_Kolei_we_Wrocławiu,CARGOTOR_Sp__z_o_o_,PKP_SKM_w_Trójmieście_Sp__z_o_o_,PKP_Linia_Hutnicza_Szerokotorowa_Sp__z_o__o_,PKP_Polskie_Linie_Kolejowe", "image/png", { minZ: 15 });
+      // This one refuses a whole-view render: it answers a GetMap up to about
+      // 1200x900 px and from some size between that and 1400x900 it sends back an
+      // error document instead of a picture - which is why the layer used to come
+      // out empty on a normal screen. As tiles of the editor's grid every request
+      // is one small cell and each of them is a hole at worst.
+      this.createWMSLayer("Geoportal - przejazdy kolejowe (wymagany duży zoom)", this.WMS_SERVICES.rail, "PMT_Linie_Kolejowe_Sp__z_o_o_,Kopalnia_Piasku_KOTLARNIA_-_Linie_Kolejowe_Sp__z__o_o_,Jastrzębska_Spółka_Kolejowa_Sp__z_o_o_,Infra_SILESIA_S_A_,EUROTERMINAL_Sławków_Sp__z_o_o_,Dolnośląska_Służba_Dróg_i_Kolei_we_Wrocławiu,CARGOTOR_Sp__z_o_o_,PKP_SKM_w_Trójmieście_Sp__z_o_o_,PKP_Linia_Hutnicza_Szerokotorowa_Sp__z_o__o_,PKP_Polskie_Linie_Kolejowe", "image/png", { singleTile: false, minZ: 15 });
       this.createWMSLayer("Geoportal - drogi", this.WMS_SERVICES.mileage, "planowane,wbudowie,pikietaz,drugorzedne,glowne,ekspresowe,autostrady", "image/png", { minZ: 12 });
       this.createWMSLayer("Geoportal - podział adm", this.WMS_SERVICES.parcels, "dzialki,numery_dzialek", "image/png", { singleTile: false, minZ: 15, hasOpacity: false });
 
@@ -820,22 +907,21 @@
       this.createWMSLayer("Geoportal - województwa", this.WMS_SERVICES.border_city, "A01_Granice_wojewodztw", "image/png", { singleTile: false, minZ: 8, hasOpacity: false });
       this.createWMSLayer("Geoportal - Granica PL", this.WMS_SERVICES.border_city, "A00_Granice_panstwa", "image/png", { singleTile: false, minZ: 0, hasOpacity: false });
 
-      this.createWMSLayer("Geoportal - obiekty topograficzne", this.WMS_SERVICES.topo, "bdot", "image/png", { singleTile: false, minZ: 16 });
+      // Topographic objects of the counties that published them. The integration
+      // behind this address hands every request to the WMS of the county it
+      // covers, and those answer in EPSG:2180 only - in 4326 the whole country
+      // comes back as an empty image, which is what the layer showed.
+      this.createWMSLayer("Geoportal - obiekty topograficzne", this.WMS_SERVICES.topo, "bdot", "image/png", { singleTile: false, minZ: 16, crs: "EPSG:2180" });
 
-      const bdotMap = {
-        "BDOT - Gruntowa": "DrDGr,DrLGr",
-        "BDOT - Utwardzona": "JDrLNUt",
-        "BDOT - Twarda": "JDLNTw,JDrZTw",
-        "BDOT - Główna": "JDrG",
-        "BDOT - W budowie (Ekspr./Główna)": "DrEk",
-        "BDOT - Jezdnia (Ekspr./Główna)": "JDrEk",
-        "BDOT - Autostrada": "JAu",
-        "BDOT - Numer drogi": "NrDr"
-      };
-
-      Object.entries(bdotMap).forEach(([name, sub]) => {
-        this.createWMSLayer(name, this.WMS_SERVICES.kompozycja, sub, "image/png", { minZ: 16 });
-      });
+      // The BDOT10k composition draws road surfaces from about 1:10 000 up, and a
+      // whole-view request at that size does not come back at all (the service
+      // stops answering), so these are tiles of the editor's grid asked for from
+      // zoom 17. What the composition offers for roads are surface classes of one
+      // and the same road network - as eight switches each of them showed a slice
+      // of it, so the network is one layer and the road numbers another.
+      const bdotRoads = "DrDGr,DrLGr,JDrLNUt,JDLNTw,JDrZTw,JDrG,DrEk,JDrEk,JAu";
+      this.createWMSLayer("BDOT - drogi (szczegółowe)", this.WMS_SERVICES.kompozycja, bdotRoads, "image/png", { singleTile: false, minZ: 17 });
+      this.createWMSLayer("BDOT - numer drogi", this.WMS_SERVICES.kompozycja, "NrDr", "image/png", { singleTile: false, minZ: 17 });
     }
 
     createWMSLayer(name, url, layers, format = "image/png", options = {}) {
