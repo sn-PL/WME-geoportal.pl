@@ -1065,10 +1065,6 @@
         groupLi.appendChild(catDiv);
       });
 
-      const info = document.createElement('div');
-      info.className = 'geoportal-info';
-      info.innerText = "Przesunięcie suwaka przezroczystości w prawo włącza warstwę.\nWarstwa ukrywa się automatycznie przy małym przybliżeniu.";
-      groupLi.appendChild(info);
       return groupLi;
     }
 
