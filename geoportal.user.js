@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            Geoportal Waze integration (fork by snPL)
-// @version         1.5.4
-// @description     Adds geoportal.gov.pl overlays ("satellite view", house numbers, cities names) to WME (SDK integration)
+// @version         1.5.5
+// @description     Dodaje warstwy geoportal.gov.pl ("podkład satelitarny", numery domów, nazwy miejscowości) do WME (integracja z WME SDK)
 // @include         https://*.waze.com/*/editor*
 // @include         https://*.waze.com/editor*
 // @include         https://*.waze.com/map-editor*
@@ -23,6 +23,7 @@
  */
 
 /* Changelog:
+ *  1.5.5 - WME SDK v2.374: async SDK mode; version-tolerant startup, events, zoom filtering and controls; photo layers request JPEG without the needless transparency flag.
  *  1.5.4 - Use SDK readiness, state and events; guard WMS and preserve the Layers menu.
  *  1.5.2 - New layer names address, streets WMS endpoint
  *  1.5.1 - Allow selective opacity sliders (checkbox-only for boundaries/addresses).
@@ -45,43 +46,266 @@
 (function () {
   'use strict';
 
-  // The SDK exposes XYZ tiles, but not WMS/custom tile URL callbacks.
-  // Keep private WME/OpenLayers rendering access in this adapter only.
+  const SCRIPT_VERSION = "1.5.5";
+  // WME SDK typings this version was checked against (wme-sdk-typings.tgz).
+  const SDK_BASELINE = "v2.374-5-g0024d1fa65";
+  const WAIT_TIMEOUT = 120000;
+  const CHECKBOX_TIMEOUT = 30000;
+  // Enabled overlays are stacked upwards from this z-index, in definition order.
+  const Z_INDEX_BASE = 2040;
+  // The script cannot work without these SDK methods; everything else is optional.
+  const REQUIRED_SDK_METHODS = {
+    State: ['isReady'],
+    Map: ['getZoomLevel'],
+    Events: ['on']
+  };
+
+  /** @typedef {import('wme-sdk-typings').AsyncWmeSDK} AsyncWmeSDK */
+  /** @typedef {Parameters<import('wme-sdk-typings').WmeSDK['Events']['on']>[0]['eventName']} SdkEventName */
+
+  /**
+   * Resolve with the first truthy value of getValue(), polling until the timeout.
+   * A returned promise (e.g. SDK_INITIALIZED) is awaited within the same timeout.
+   */
+  async function waitFor(getValue, description, timeout = WAIT_TIMEOUT) {
+    let timer, retry;
+    try {
+      return await Promise.race([
+        new Promise((resolve, reject) => {
+          const poll = () => {
+            try {
+              const value = getValue();
+              if (value) resolve(value);
+              else retry = setTimeout(poll, 500);
+            } catch (error) { reject(error); }
+          };
+          poll();
+        }),
+        new Promise((resolve, reject) => {
+          timer = setTimeout(() => reject(new Error(
+            `Timed out waiting for ${description}. Reload WME or update the script.`
+          )), timeout);
+        })
+      ]);
+    } finally {
+      clearTimeout(timer);
+      clearTimeout(retry);
+    }
+  }
+
+  /**
+   * Public WME SDK access. The SDK is requested in the recommended async mode
+   * (the default sync mode is deprecated and scheduled for removal). Every call
+   * is awaited, so the same code also works if WME returns plain values.
+   */
+  class SdkAdapter {
+    /**
+     * @param {{ scriptId: string, scriptName: string }} script
+     * @returns {Promise<SdkAdapter>}
+     */
+    static async connect(script) {
+      const getSdk = () => {
+        const sdk = window.getWmeSdk;
+        // SDK_INITIALIZED may appear only after the script runs, and getWmeSdk
+        // after it; inside a try, so that a throwing global counts as "not yet".
+        try {
+          return window.SDK_INITIALIZED && typeof sdk === 'function' ? sdk : false;
+        } catch (error) {
+          return false;
+        }
+      };
+      const getWmeSdk = await waitFor(getSdk, 'the WME SDK');
+      // `mode` is documented since v2.371; the global typings still declare only the sync SDK.
+      /** @type {AsyncWmeSDK} */
+      const sdk = await /** @type {any} */ (getWmeSdk)({ ...script, mode: 'async' });
+      const missing = Object.entries(REQUIRED_SDK_METHODS).flatMap(([module, methods]) => methods
+        .filter(method => typeof sdk?.[module]?.[method] !== 'function')
+        .map(method => `${module}.${method}`));
+      if (missing.length) {
+        throw new Error(`Required WME SDK methods missing: ${missing.join(', ')}. Update the script.`);
+      }
+      return new SdkAdapter(sdk);
+    }
+
+    /** @param {AsyncWmeSDK} sdk */
+    constructor(sdk) {
+      this.sdk = sdk;
+    }
+
+    /** Versions and SDK mode, for diagnosing problems after a WME update. */
+    async describe() {
+      const read = async method => {
+        try {
+          const value = typeof this.sdk[method] === 'function' ? await this.sdk[method]() : null;
+          // WME answered 0 for getSDKVersion, so report only a real version.
+          return typeof value === 'string' && value ? value : '?';
+        } catch (error) {
+          return '?';
+        }
+      };
+      let mode = '?';
+      try {
+        const probe = this.sdk.State.isReady();
+        mode = typeof probe?.then === 'function' ? 'async' : 'sync';
+        await probe;
+      } catch (error) { /* reported later by waitForReady() */ }
+      return `WME ${await read('getWMEVersion')}, SDK ${await read('getSDKVersion')}, ${mode} mode`;
+    }
+
+    /**
+     * Subscribe to an SDK event. A renamed or removed event must not stop the
+     * script, so a failure is reported and null is returned. Handler errors stay
+     * here and never reach the event bus shared with other scripts.
+     * @param {SdkEventName} eventName
+     * @param {() => unknown} handler
+     * @returns {(() => void) | null} unsubscribe function
+     */
+    on(eventName, handler) {
+      const eventHandler = () => {
+        try {
+          handler();
+        } catch (error) {
+          console.error(`[Geoportal] Could not handle "${eventName}":`, error);
+        }
+      };
+      try {
+        const off = this.sdk.Events.on({ eventName, eventHandler });
+        return () => {
+          try {
+            if (typeof off === 'function') off();
+          } catch (error) { /* already unsubscribed */ }
+        };
+      } catch (error) {
+        console.warn(`[Geoportal] WME SDK event "${eventName}" is not available:`, error);
+        return null;
+      }
+    }
+
+    /**
+     * Resolve once WME is initialized, the user is logged in and the initial map
+     * data is loaded. No hard timeout: logging in can take any amount of time.
+     */
+    async waitForReady() {
+      let finish, retry, done = false, reported = false;
+      const ready = new Promise(resolve => { finish = resolve; });
+      // Subscribe before the first check, so the one-time event cannot be missed.
+      // The state check also covers an event that is no longer dispatched.
+      const off = this.on('wme-ready', () => finish());
+      const check = async () => {
+        try {
+          if (await this.sdk.State.isReady()) return finish();
+        } catch (error) {
+          if (!reported) console.warn('[Geoportal] Could not read WME readiness:', error);
+          reported = true;
+        }
+        if (!done) retry = setTimeout(check, 1000);
+      };
+      const slow = setTimeout(() => console.warn(
+        '[Geoportal] Still waiting for WME to become ready (login and map data).'), WAIT_TIMEOUT);
+      check();
+      try {
+        await ready;
+      } finally {
+        done = true;
+        clearTimeout(retry);
+        clearTimeout(slow);
+        off?.();
+      }
+    }
+
+    /** Optional: only the OSM layer needs the user data, and only for its rank. */
+    async getUserInfo() {
+      try {
+        return await this.sdk.State.getUserInfo();
+      } catch (error) {
+        return null;
+      }
+    }
+
+    async getZoomLevel() {
+      const zoom = await this.sdk.Map.getZoomLevel();
+      if (!Number.isFinite(zoom)) throw new Error(`Unexpected zoom level from the WME SDK: ${zoom}`);
+      return zoom;
+    }
+  }
+
+  // The SDK builds only XYZ tile URLs (${z}/${x}/${y}), while WMS GetMap needs a
+  // bounding box per tile. Keep private WME/OpenLayers rendering access here only.
   class WmsAdapter {
     static connect() {
-      const OL = window.OpenLayers;
-      const mapWrapper = window.W?.map;
-      const map = typeof mapWrapper?.addLayer === 'function'
-        ? mapWrapper : (typeof mapWrapper?.getOLMap === 'function' ? mapWrapper.getOLMap() : null);
-      const methods = ['setVisibility', 'setOpacity', 'setZIndex', 'adjustBounds',
-        'getImageSize', 'getFullRequestString'];
-      if (typeof OL?.Projection !== 'function' || typeof OL?.Layer?.WMS !== 'function' ||
-          typeof OL?.Layer?.Grid?.prototype?.getFullRequestString !== 'function' ||
-          !methods.every(method => typeof OL.Layer.WMS.prototype[method] === 'function') ||
-          typeof map?.addLayer !== 'function') return null;
-      return new WmsAdapter(OL, map);
+      try {
+        const OL = window.OpenLayers;
+        const mapWrapper = window.W?.map;
+        const map = typeof mapWrapper?.addLayer === 'function'
+          ? mapWrapper : (typeof mapWrapper?.getOLMap === 'function' ? mapWrapper.getOLMap() : null);
+        const methods = ['setVisibility', 'setOpacity', 'setZIndex', 'adjustBounds',
+          'getImageSize', 'getFullRequestString'];
+        if (typeof OL?.Projection !== 'function' || typeof OL?.Layer?.WMS !== 'function' ||
+            typeof OL?.Layer?.Grid?.prototype?.getFullRequestString !== 'function' ||
+            !methods.every(method => typeof OL.Layer.WMS.prototype[method] === 'function') ||
+            typeof map?.addLayer !== 'function') return null;
+        return new WmsAdapter(OL, map);
+      } catch (error) {
+        return null;
+      }
     }
 
     constructor(OL, map) {
       this.OL = OL;
       this.map = map;
+      this.olMap = null; // OpenLayers map holding our layers, known after the first one is added.
+      this.mapHandlers = null; // callbacks to run on the map's own events
+      this.watching = false; // the map's events are hooked
+      this.zoomLevel = null;
+      this.zoomResolution = null;
       this.sourceProjection = new OL.Projection("EPSG:900913");
       this.targetProjection = new OL.Projection("EPSG:4326");
     }
 
-    createLayer({ name, url, layers, format, options }, opacity, getZoom) {
+    /** Store the SDK zoom level together with the map resolution it belongs to. */
+    setZoomLevel(level) {
+      this.zoomLevel = level;
+      this.zoomResolution = this.getMapResolution();
+    }
+
+    getMapResolution() {
+      try {
+        const resolution = this.olMap?.getResolution?.();
+        return Number.isFinite(resolution) && resolution > 0 ? resolution : null;
+      } catch (error) {
+        return null;
+      }
+    }
+
+    /**
+     * Zoom level of a tile request. In async mode the zoom level is known only
+     * after wme-map-zoom-changed, but OpenLayers requests tiles before that event.
+     * Derive the change from the request resolution (one zoom level = factor 2).
+     */
+    zoomAt(resolution) {
+      if (!this.zoomResolution || !(resolution > 0)) return this.zoomLevel;
+      return this.zoomLevel + Math.round(Math.log2(this.zoomResolution / resolution));
+    }
+
+    createLayer({ name, url, layers, format, options }, opacity) {
       const adapter = this;
-      const layer = new this.OL.Layer.WMS(name, url,
-        { layers, transparent: "true", format, version: "1.3.0" },
+      const minZoom = options.minZ ?? 0;
+      // The photo layers are opaque mosaics: transparency is a contradiction there
+      // and OpenLayers answered it by switching their JPEG to PNG. Only the PNG
+      // overlays ask for it, so the requests stay as they were before 1.5.0.
+      /** @type {Record<string, string>} */
+      const params = { layers, format, version: "1.3.0" };
+      if (format !== "image/jpeg") params.transparent = "true";
+      const layer = new this.OL.Layer.WMS(name, url, params,
         {
           isBaseLayer: false, visibility: false,
           singleTile: options.singleTile ?? true,
           transitionEffect: "resize",
-          maxGetUrlRetries: 5,
+          noMagic: true, // never let OpenLayers rewrite the format
           getURL: function (bounds) {
-            if (getZoom() < (options.minZ ?? 0)) return null;
             bounds = this.adjustBounds(bounds.clone());
             const imageSize = this.getImageSize(bounds);
+            if (adapter.zoomAt((bounds.right - bounds.left) / imageSize.w) < minZoom) return null;
             bounds.transform(adapter.sourceProjection, adapter.targetProjection);
             // WMS 1.3.0 / EPSG:4326 uses latitude, longitude axis order.
             return this.getFullRequestString({
@@ -95,7 +319,45 @@
         });
       layer.setOpacity(opacity);
       this.map.addLayer(layer);
+      if (!this.olMap && layer.map) {
+        this.olMap = layer.map;
+        if (this.zoomResolution === null) this.zoomResolution = this.getMapResolution();
+        this.attachMapEvents();
+      }
       return layer;
+    }
+
+    /**
+     * Watch the map itself. Remembered until the map is known, i.e. until the
+     * first WMS layer is attached to it.
+     * @param {{ onZoom: () => void, onLayers: () => void }} handlers
+     */
+    watchMap(handlers) {
+      this.mapHandlers = handlers;
+      this.attachMapEvents();
+    }
+
+    /**
+     * The SDK events are the documented channel; these are the events of the map
+     * that actually renumbers z-indexes and changes the zoom. They keep the
+     * script working when WME renames or drops an SDK event, and moveend is
+     * dispatched after the animation, when zoom and resolution already match.
+     */
+    attachMapEvents() {
+      if (this.watching) return;
+      const events = this.olMap?.events;
+      const { onZoom, onLayers } = this.mapHandlers ?? {};
+      if (typeof events?.on !== 'function' ||
+          typeof onZoom !== 'function' || typeof onLayers !== 'function') return;
+      events.on({
+        moveend: onZoom,
+        addlayer: onLayers,
+        removelayer: onLayers,
+        // Only a reorder renumbers z-indexes; our own opacity/visibility changes
+        // also report through this event and must not re-enter the z-index loop.
+        changelayer: event => { if (event?.property === 'order') onLayers(); }
+      });
+      this.watching = true;
     }
   }
 
@@ -111,32 +373,71 @@
       return null;
     }
 
+    static hasWmeCheckbox() {
+      return Boolean(window.customElements?.get('wz-checkbox'));
+    }
+
+    /** Resolve true once wz-checkbox is registered, or false after the timeout. */
+    static whenWmeCheckbox(timeout) {
+      if (LayerMenuAdapter.hasWmeCheckbox()) return Promise.resolve(true);
+      if (typeof window.customElements?.whenDefined !== 'function') return Promise.resolve(false);
+      return new Promise(resolve => {
+        const timer = setTimeout(() => resolve(false), timeout);
+        window.customElements.whenDefined('wz-checkbox').then(() => {
+          clearTimeout(timer);
+          resolve(true);
+        }, () => resolve(false));
+      });
+    }
+
+    /**
+     * @param {string} name
+     * @param {boolean} checked
+     * @param {(checked: boolean) => void} onChange
+     * @returns {{ element: HTMLElement, setChecked: (checked: boolean) => void }}
+     */
     static createCheckbox(name, checked, onChange) {
-      const checkbox = document.createElement('wz-checkbox');
-      checkbox.appendChild(document.createTextNode(name));
-      checkbox.checked = checked;
-      const changed = () => {
-        // Read the host after its own click handler, not a retargeted inner input.
-        // Some WME versions emit change, others only click. Deduplicate both.
-        queueMicrotask(() => {
-          const value = checkbox.checked;
-          if (typeof value === 'boolean') onChange(value);
-        });
-      };
-      checkbox.addEventListener('change', changed);
-      checkbox.addEventListener('click', changed);
-      return checkbox;
+      if (LayerMenuAdapter.hasWmeCheckbox()) {
+        /** @type {HTMLElement & { checked?: unknown }} */
+        const checkbox = document.createElement('wz-checkbox');
+        checkbox.appendChild(document.createTextNode(name));
+        checkbox.checked = checked;
+        const changed = () => {
+          // Read the host after its own click handler, not a retargeted inner input.
+          // Some WME versions emit change, others only click. Deduplicate both.
+          queueMicrotask(() => {
+            const value = checkbox.checked;
+            if (typeof value === 'boolean') onChange(value);
+          });
+        };
+        checkbox.addEventListener('change', changed);
+        checkbox.addEventListener('click', changed);
+        return { element: checkbox, setChecked: value => { checkbox.checked = value; } };
+      }
+      // Same behaviour with a native checkbox if WME stops providing wz-checkbox.
+      const label = document.createElement('label');
+      label.className = 'geoportal-native-checkbox';
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.checked = checked;
+      input.addEventListener('change', () => onChange(input.checked));
+      label.appendChild(input);
+      label.appendChild(document.createTextNode(name));
+      return { element: label, setChecked: value => { input.checked = value; } };
     }
   }
 
   class GeoportalIntegration {
     constructor() {
-      this.ver = "1.5.4";
+      this.ver = SCRIPT_VERSION;
       this.layers = {};
       this.settingsKey = 'wme_geoportal_settings';
       this.settings = this.loadSettings();
       this.initializing = false;
       this.initialized = false;
+      this.zoom = null;
+      this.refreshRequest = 0;
+      this.refreshError = null;
 
       this.WMS_SERVICES = {
         orto: "https://mapy.geoportal.gov.pl/wss/service/PZGIK/ORTO/WMS/StandardResolution?",
@@ -203,87 +504,39 @@
       });
     }
 
-    async waitFor(getValue, description) {
-      let timeout, retry;
-      try {
-        return await Promise.race([
-          new Promise((resolve, reject) => {
-            const poll = () => {
-              try {
-                const value = getValue();
-                if (value) resolve(value); // Also waits for SDK_INITIALIZED's promise.
-                else retry = setTimeout(poll, 1000);
-              } catch (error) { reject(error); }
-            };
-            poll();
-          }),
-          new Promise((resolve, reject) => {
-            timeout = setTimeout(() => reject(new Error(
-              `Timed out waiting for ${description}. Reload WME or update the script.`
-            )), 120000);
-          })
-        ]);
-      } finally {
-        clearTimeout(timeout);
-        clearTimeout(retry);
-      }
-    }
-
     async bootstrap() {
       if (this.initializing || this.initialized) return;
       this.initializing = true;
-      // SDK_INITIALIZED may not exist yet when the userscript first runs.
-      await this.waitFor(() => window.SDK_INITIALIZED, 'the WME SDK');
-      await this.waitFor(() => typeof window.getWmeSdk === 'function', 'getWmeSdk');
-      this.sdk = await window.getWmeSdk({
+      this.sdk = await SdkAdapter.connect({
         scriptId: 'wme-geoportal-pl',
         scriptName: 'Geoportal Waze integration'
       });
-      const required = {
-        State: ['isReady', 'getUserInfo'],
-        Map: ['getZoomLevel'],
-        Events: ['on']
-      };
-      for (const [module, methods] of Object.entries(required)) {
-        for (const method of methods) {
-          if (typeof this.sdk?.[module]?.[method] !== 'function') {
-            throw new Error(`Required WME SDK method missing: ${module}.${method}. Update the script.`);
-          }
-        }
-      }
-      // Register first so readiness cannot be missed between the check and subscription.
-      let signalReady;
-      const ready = new Promise(resolve => { signalReady = resolve; });
-      const unsubscribe = this.sdk.Events.on({ eventName: 'wme-ready', eventHandler: signalReady });
-      try {
-        if (!await this.sdk.State.isReady()) await this.waitFor(() => ready, 'WME readiness');
-      } finally {
-        if (typeof unsubscribe === 'function') unsubscribe();
-      }
-      this.user = await this.sdk.State.getUserInfo();
-      const zoom = this.sdk.Map.getZoomLevel();
-      this.zoom = await zoom;
-      // Tile requests can precede SDK zoom events. Read the synchronous API
-      // directly; only an asynchronous SDK needs the event-updated cache.
-      this.getZoom = typeof zoom === 'number'
-        ? () => this.sdk.Map.getZoomLevel() : () => this.zoom;
-      this.wms = await this.waitFor(() => WmsAdapter.connect(), 'the legacy WMS renderer');
+      this.log(`Connected to ${await this.sdk.describe()} (checked against SDK ${SDK_BASELINE})`);
+      await this.sdk.waitForReady();
+      this.user = await this.sdk.getUserInfo();
+      this.wms = await waitFor(() => WmsAdapter.connect(), 'the legacy WMS renderer');
 
-      // Wait for component registration before setting checked (avoids shadowing
-      // the custom element's setter when the layer card loads late).
-      await this.waitFor(() => window.customElements?.get('wz-checkbox'), 'WME checkboxes');
       this.setupUI();
       this.createLayersDefinition();
+      const refresh = () => this.refreshLayers().then(() => {
+        this.refreshError = null;
+      }, error => {
+        // Report each distinct problem once; the next map event retries anyway.
+        const message = String(error?.message ?? error);
+        if (message !== this.refreshError) console.error('[Geoportal] Could not refresh WMS layers:', error);
+        this.refreshError = message;
+      });
+      this.sdk.on('wme-map-zoom-changed', refresh);
+      // OpenLayers renumbers z-indexes when layers are added, removed or reordered.
+      const fixZIndex = () => this.fixZIndex();
+      this.sdk.on('wme-map-layer-added', fixZIndex);
+      this.sdk.on('wme-map-layer-changed', fixZIndex);
+      this.sdk.on('wme-map-layer-removed', fixZIndex);
+      // The same signals straight from the map that the SDK events mirror.
+      this.wms.watchMap({ onZoom: refresh, onLayers: fixZIndex });
+      await refresh();
       this.startMutationObserver();
       this.injectUI();
-      const refresh = () => this.refreshLayers().catch(error => {
-        console.error('[Geoportal] Could not refresh WMS layers:', error);
-      });
-      this.sdk.Events.on({ eventName: 'wme-map-zoom-changed', eventHandler: refresh });
-      this.sdk.Events.on({ eventName: 'wme-map-move-end', eventHandler: refresh });
-      this.sdk.Events.on({ eventName: 'wme-map-layer-changed', eventHandler: () => this.fixZIndex() });
-      await this.refreshLayers();
-      this.startZIndexMonitor();
       this.initialized = true;
       this.log('Initialization complete (WME SDK)');
     }
@@ -354,6 +607,7 @@
                     padding: 0 4px;
                     line-height: 1.3;
                 }
+                .geoportal-native-checkbox { display: flex; align-items: center; gap: 8px; cursor: pointer; }
             `;
       document.head.appendChild(style);
     }
@@ -410,10 +664,10 @@
         opacity: this.settings.layerOpacity[name] ?? 1.0,
         isEnabled: this.settings.enabledLayers[name] ?? false,
         updateVisibility: function () {
-          const visible = this.isEnabled && integration.zoom >= (options.minZ ?? 0);
+          const visible = this.isEnabled && integration.zoom !== null &&
+            integration.zoom >= (options.minZ ?? 0);
           if (visible && !this.instance) {
-            this.instance = integration.wms.createLayer(this.definition, this.opacity,
-              integration.getZoom);
+            this.instance = integration.wms.createLayer(this.definition, this.opacity);
           }
           if (this.instance) this.instance.setVisibility(visible);
         },
@@ -433,16 +687,37 @@
     injectUI() {
       const list = LayerMenuAdapter.findList();
       if (!list) return;
-      // Reattach the same controls if WME replaces the entire layer card.
-      if (this.uiGroup) {
-        if (this.uiGroup.parentNode !== list) list.appendChild(this.uiGroup);
-        return;
+      if (!this.uiGroup) {
+        if (!this.checkboxesReady()) return;
+        this.uiGroup = this.createUIGroup();
       }
+      // Reattach the same controls if WME replaces the entire layer card.
+      if (this.uiGroup.parentNode !== list) list.appendChild(this.uiGroup);
+    }
+
+    // Build the controls once WME's checkbox component is registered (setting
+    // `checked` earlier would shadow its setter). Fall back to native checkboxes
+    // if a future WME no longer provides the component.
+    checkboxesReady() {
+      if (this.uiReady || LayerMenuAdapter.hasWmeCheckbox()) {
+        this.uiReady = true;
+        return true;
+      }
+      if (!this.uiWaiting) {
+        this.uiWaiting = true;
+        LayerMenuAdapter.whenWmeCheckbox(CHECKBOX_TIMEOUT).then(found => {
+          if (!found) console.warn('[Geoportal] WME checkbox component not found, using native checkboxes.');
+          this.uiReady = true;
+          this.injectUI();
+        });
+      }
+      return false;
+    }
+
+    createUIGroup() {
       const groupLi = document.createElement('li');
       groupLi.id = 'geoportal-layers-group';
       groupLi.className = 'group';
-      this.uiGroup = groupLi;
-      list.appendChild(groupLi);
 
       const header = document.createElement('div');
       header.className = 'geoportal-separator';
@@ -476,8 +751,9 @@
 
       const info = document.createElement('div');
       info.className = 'geoportal-info';
-      info.innerText = "Increasing opacity enables the layer.\nHides automatically at low zoom.";
+      info.innerText = "Przesunięcie suwaka przezroczystości w prawo włącza warstwę.\nWarstwa ukrywa się automatycznie przy małym przybliżeniu.";
       groupLi.appendChild(info);
+      return groupLi;
     }
 
     createUIItem(lName) {
@@ -491,7 +767,7 @@
         lData.setVisibility(checked);
         this.saveSettings();
       });
-      control.appendChild(checkbox);
+      control.appendChild(checkbox.element);
       if (lData.hasOpacity) {
         const sliderContainer = document.createElement('div');
         sliderContainer.className = 'geoportal-slider-container';
@@ -502,14 +778,14 @@
         const opacityVal = document.createElement('span');
         opacityVal.className = 'geoportal-opacity-value';
         opacityVal.innerText = (Math.round(lData.opacity * 100)).toString() + "%";
-        slider.addEventListener('input', (e) => {
-          const val = parseInt(e.target.value) / 100;
+        slider.addEventListener('input', () => {
+          const val = parseInt(slider.value) / 100;
           lData.setOpacity(val);
-          opacityVal.innerText = e.target.value + "%";
+          opacityVal.innerText = slider.value + "%";
           if (val > 0 && !lData.isEnabled) {
-            checkbox.checked = true; lData.setVisibility(true); this.saveSettings();
+            checkbox.setChecked(true); lData.setVisibility(true); this.saveSettings();
           } else if (val === 0 && lData.isEnabled) {
-            checkbox.checked = false; lData.setVisibility(false); this.saveSettings();
+            checkbox.setChecked(false); lData.setVisibility(false); this.saveSettings();
           }
         });
         slider.addEventListener('change', () => this.saveSettings());
@@ -520,27 +796,21 @@
     }
 
     async refreshLayers() {
-      const request = this.refreshRequest = (this.refreshRequest || 0) + 1;
-      // The current SDK returns a number: do not defer zoom filtering until a
-      // microtask, since OpenLayers can request tiles in the same event cycle.
-      const result = this.sdk.Map.getZoomLevel();
-      const zoom = typeof result === 'number' ? result : await result;
+      const request = ++this.refreshRequest;
+      const zoom = await this.sdk.getZoomLevel();
+      // Refreshes can overlap; apply only the most recent answer.
       if (request !== this.refreshRequest) return;
       this.zoom = zoom;
+      this.wms.setZoomLevel(zoom);
       Object.values(this.layers).forEach(layer => layer.updateVisibility());
       this.fixZIndex();
     }
 
     fixZIndex() {
-      let currentZIndex = 2040;
+      let currentZIndex = Z_INDEX_BASE;
       Object.values(this.layers).forEach(layer => {
         if (layer.instance && layer.isEnabled) layer.instance.setZIndex(currentZIndex++);
       });
-    }
-
-    startZIndexMonitor() {
-      // WME can reorder its own layers without moving the map.
-      this.zIndexTimer = setInterval(() => this.fixZIndex(), 5000);
     }
 
     startMutationObserver() {
