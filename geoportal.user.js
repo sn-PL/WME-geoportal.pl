@@ -23,7 +23,7 @@
  */
 
 /* Changelog:
- *  1.5.5 - WME SDK v2.374: async SDK mode; version-tolerant startup, events, zoom filtering and controls; photo layers request JPEG without the needless transparency flag, as one image per view instead of a tile grid (the ortho WMS answers whole tile batches with 404).
+ *  1.5.5 - WME SDK v2.374: async SDK mode; version-tolerant startup, events, zoom filtering and controls; photo layers request JPEG without the needless transparency flag, as one image per view instead of a tile grid (the ortho WMS answers whole tile batches with 404); a refused image is requested up to three more times.
  *  1.5.4 - Use SDK readiness, state and events; guard WMS and preserve the Layers menu.
  *  1.5.2 - New layer names address, streets WMS endpoint
  *  1.5.1 - Allow selective opacity sliders (checkbox-only for boundaries/addresses).
@@ -244,6 +244,12 @@
             typeof OL?.Layer?.Grid?.prototype?.getFullRequestString !== 'function' ||
             !methods.every(method => typeof OL.Layer.WMS.prototype[method] === 'function') ||
             typeof map?.addLayer !== 'function') return null;
+        // The ortho WMS refuses part of the valid GetMap requests in bursts: the
+        // front-end replies with an empty 404 page and the refusal passes within
+        // seconds. OpenLayers re-requests the same image while the tile's reload
+        // counter stays within this limit (zero by default), which is what such
+        // short-lived refusals need.
+        OL.IMAGE_RELOAD_ATTEMPTS = 3;
         return new WmsAdapter(OL, map);
       } catch (error) {
         return null;
