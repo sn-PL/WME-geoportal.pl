@@ -304,8 +304,9 @@
     createLayer({ name, url, layers, format, options }, opacity) {
       const adapter = this;
       const minZoom = options.minZ ?? 0;
+      const singleTile = options.singleTile ?? true;
       // State of this layer's image recovery, shared with retryMissingImage.
-      const recovery = { tried: 0, timer: null, stamp: null };
+      const recovery = { tried: 0, timer: null, stamp: null, holding: false };
       // The photo layers are opaque mosaics: transparency is a contradiction there
       // and OpenLayers answered it by switching their JPEG to PNG. Only the PNG
       // overlays ask for it, so the requests stay as they were before 1.5.0.
@@ -315,7 +316,7 @@
       const layer = new this.OL.Layer.WMS(name, url, params,
         {
           isBaseLayer: false, visibility: false,
-          singleTile: options.singleTile ?? true,
+          singleTile,
           transitionEffect: "resize",
           noMagic: true, // never let OpenLayers rewrite the format
           getURL: function (bounds) {
@@ -333,6 +334,16 @@
           getFullRequestString: function () {
             this.params.CRS = "EPSG:4326";
             return adapter.OL.Layer.Grid.prototype.getFullRequestString.apply(this, arguments);
+          },
+          // OpenLayers drops its back buffer - the image the layer is showing -
+          // as soon as the replacement counts as loaded, and a refused image
+          // counts as loaded too. In single-tile mode that image is the whole
+          // view, so a refused refresh used to wipe the photo layer off the map
+          // until a retry arrived. Keep the delivered view, and let go of it
+          // only when a replacement really is delivered.
+          removeBackBuffer: function () {
+            if (singleTile && recovery.holding) return;
+            return adapter.OL.Layer.Grid.prototype.removeBackBuffer.apply(this, arguments);
           }
         });
       layer.setOpacity(opacity);
@@ -347,16 +358,16 @@
     }
 
     /**
-     * A layer OpenLayers gave up on stays empty until the next big pan or zoom: the
-     * failed image counts as loaded, the front-end refusals are short-lived, and a
-     * photo layer carries the whole view in one image, so that empty layer is the
-     * whole map. Ask for the view again at the delays in IMAGE_RETRY_DELAYS -
-     * through mergeNewParams, because OpenLayers' tile manager keeps a refused
-     * draw in a queue that the layer's params event flushes, while a plain redraw
-     * would leave it there. A new map view and a delivered image start the
-     * attempts over.
+     * OpenLayers counts a refused image as loaded and never asks for it again, and
+     * in single-tile mode that image is the whole view. The delivered view is kept
+     * on screen through the refusal (removeBackBuffer in createLayer) and the view
+     * is asked for again at the delays in IMAGE_RETRY_DELAYS - through
+     * mergeNewParams, because OpenLayers' tile manager keeps a refused draw in a
+     * queue that the layer's params event flushes, while a plain redraw would
+     * leave it there. A new map view and a delivered image start the attempts
+     * over.
      * @param {any} layer WMS layer built by createLayer
-     * @param {{tried: number, timer: any, stamp: number|null}} recovery its state
+     * @param {{tried: number, timer: any, stamp: number|null, holding: boolean}} recovery its state
      */
     retryMissingImage(layer, recovery) {
       const restart = () => {
@@ -373,14 +384,31 @@
       this.recoveries.push(restart);
       layer.events.on({
         // A delivered image ends the recovery. OpenLayers reports a refused image
-        // as loaded as well, and marks that one; only the others count.
+        // as loaded as well, and marks that one; only the others count. It is also
+        // what ends the hold on the image the layer is showing.
         tileloaded: event => {
-          if (!event?.tile?.imgDiv?.classList?.contains('olImageLoadError')) restart();
+          if (!event?.tile?.imgDiv?.classList?.contains('olImageLoadError')) {
+            recovery.holding = false;
+            restart();
+          }
         },
         tileerror: () => {
+          // The refused refresh must not take the delivered view with it; that is
+          // what removeBackBuffer in createLayer holds back until a replacement is
+          // delivered.
+          recovery.holding = true;
           recovery.stamp = Date.now();
           if (recovery.timer || recovery.tried >= IMAGE_RETRY_DELAYS.length) return;
           recovery.timer = setTimeout(recover, IMAGE_RETRY_DELAYS[recovery.tried++]);
+        },
+        // A hidden layer cannot show the image kept for it, and after a zoom that
+        // image sits outside the layer's own div, where hiding the layer would
+        // leave the old picture on the map.
+        visibilitychanged: () => {
+          if (layer.visibility || !layer.backBuffer) return;
+          if (layer.backBuffer.parentNode === layer.div) return;
+          recovery.holding = false;
+          this.OL.Layer.Grid.prototype.removeBackBuffer.call(layer);
         }
       });
     }
@@ -669,6 +697,11 @@
                     line-height: 1.3;
                 }
                 .geoportal-native-checkbox { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+
+                /* OpenLayers shows the element of a refused image again (empty,
+                   possibly with the browser's broken-image mark) and marks it with
+                   this class. It must not cover the view kept on screen. */
+                img.olImageLoadError { visibility: hidden !important; }
             `;
       document.head.appendChild(style);
     }
