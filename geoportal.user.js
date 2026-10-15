@@ -46,13 +46,20 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = "1.5.5";
+  const SCRIPT_VERSION = "1.5.6";
   // WME SDK typings this version was checked against (wme-sdk-typings.tgz).
   const SDK_BASELINE = "v2.374-5-g0024d1fa65";
   const WAIT_TIMEOUT = 120000;
   const CHECKBOX_TIMEOUT = 30000;
   // Enabled overlays are stacked upwards from this z-index, in definition order.
   const Z_INDEX_BASE = 2040;
+  // The Geoportal serves the standard ortho in the editor's own tile grid: Web
+  // Mercator EPSG:3857, 256 px tiles, levels 0-19, the same z/x/y tiles the map
+  // is drawn from. Above level 19 there are no tiles, so OpenLayers keeps asking
+  // for level 19 and stretches it - which is the detail the data has anyway.
+  const ORTO_TILE_MAX_ZOOM = 19;
+  // Resolution of a 256 px Web Mercator tile at level 0 (the whole world).
+  const MERCATOR_WORLD_RESOLUTION = 156543.03392804097;
   // The script cannot work without these SDK methods; everything else is optional.
   const REQUIRED_SDK_METHODS = {
     State: ['isReady'],
@@ -60,11 +67,10 @@
     Events: ['on']
   };
   // A refused image is not requested again by OpenLayers: it counts as loaded and
-  // the layer stays empty until the next big pan or zoom, while a photo layer
-  // carries the whole view in one image. The first re-request is OpenLayers' own
-  // (IMAGE_RELOAD_ATTEMPTS, set where the WMS layer is built); these are the
-  // delays (ms) of the ones after it - past the burst that the front-end refuses,
-  // and with a fresh timestamp so the answer cannot come from a cache.
+  // the layer stays empty until the next big pan or zoom. The first re-request is
+  // OpenLayers' own (IMAGE_RELOAD_ATTEMPTS, set where the layers are built); these
+  // are the delays (ms) of the ones after it - past the burst that the front-end
+  // refuses, and with a fresh timestamp so the answer cannot come from a cache.
   const IMAGE_RETRY_DELAYS = [1000, 3000];
 
   /** @typedef {import('wme-sdk-typings').AsyncWmeSDK} AsyncWmeSDK */
@@ -301,7 +307,9 @@
       return this.zoomLevel + Math.round(Math.log2(this.zoomResolution / resolution));
     }
 
-    createLayer({ name, url, layers, format, options }, opacity) {
+    createLayer(definition, opacity) {
+      if (definition.kind === "wmts") return this.createTileLayer(definition, opacity);
+      const { name, url, layers, format, options } = definition;
       const adapter = this;
       const minZoom = options.minZ ?? 0;
       const singleTile = options.singleTile ?? true;
@@ -358,15 +366,74 @@
     }
 
     /**
-     * OpenLayers counts a refused image as loaded and never asks for it again, and
-     * in single-tile mode that image is the whole view. The delivered view is kept
-     * on screen through the refusal (removeBackBuffer in createLayer) and the view
-     * is asked for again at the delays in IMAGE_RETRY_DELAYS - through
-     * mergeNewParams, because OpenLayers' tile manager keeps a refused draw in a
-     * queue that the layer's params event flushes, while a plain redraw would
-     * leave it there. A new map view and a delivered image start the attempts
-     * over.
-     * @param {any} layer WMS layer built by createLayer
+     * The standard ortho as the editor's own tiles. The Geoportal publishes it as
+     * Web Mercator tiles (EPSG:3857, 256 px, levels 0-19) whose indices are the
+     * ordinary z/x/y of the grid the editor's map is drawn from, so OpenLayers
+     * asks the service for exactly the tile that belongs in each cell of that
+     * grid. A refused tile is one hole with the editor's base map behind it,
+     * instead of a whole-view image whose refusal used to leave the view empty.
+     * Level 19 is the last one the service has: above it OpenLayers keeps asking
+     * for level 19 and stretches that tile, which carries the detail the data has.
+     * @param {{ name: string, url: string, options: any }} definition
+     * @param {number} opacity
+     */
+    createTileLayer({ name, url, options }, opacity) {
+      const adapter = this;
+      const minZoom = options.minZ ?? 0;
+      const maxZoom = Math.min(options.maxZ ?? ORTO_TILE_MAX_ZOOM, ORTO_TILE_MAX_ZOOM);
+      // State of this layer's image recovery, shared with retryMissingImage.
+      const recovery = { tried: 0, timer: null, stamp: null, holding: false };
+      // The service's levels as resolutions of the standard grid, i.e. the same
+      // values as the editor's zoom levels, so its tiles line up with the tiles
+      // the map is drawn from and a hole is exactly one tile of that map.
+      const resolutions = [];
+      for (let zoom = 0; zoom <= maxZoom; zoom++) {
+        resolutions.push(MERCATOR_WORLD_RESOLUTION / Math.pow(2, zoom));
+      }
+      const world = new this.OL.Bounds(-20037508.342789244, -20037508.342789244,
+        20037508.342789244, 20037508.342789244);
+      const layer = new this.OL.Layer.XYZ(name, url, {
+        isBaseLayer: false, visibility: false,
+        sphericalMercator: true,
+        tileSize: new this.OL.Size(256, 256),
+        maxExtent: world,
+        tileOriginCorner: "tl",
+        resolutions,
+        serverResolutions: resolutions,
+        // Above the last level the layer still draws the stretched level-19
+        // tiles, so OpenLayers must not hide it as out of range there.
+        alwaysInRange: true,
+        transitionEffect: "resize",
+        getURL: function (bounds) {
+          const level = Math.round(Math.log2(MERCATOR_WORLD_RESOLUTION / this.getServerResolution()));
+          if (level < minZoom || level > maxZoom) return null;
+          const tileUrl = adapter.OL.Layer.XYZ.prototype.getURL.call(this, bounds);
+          // As long as this layer misses an image, ask under a fresh address, so
+          // that no cache can answer with the refused response.
+          return recovery.stamp && tileUrl ? tileUrl + "&_=" + recovery.stamp : tileUrl;
+        }
+      });
+      layer.setOpacity(opacity);
+      this.map.addLayer(layer);
+      this.retryMissingImage(layer, recovery);
+      if (!this.olMap && layer.map) {
+        this.olMap = layer.map;
+        if (this.zoomResolution === null) this.zoomResolution = this.getMapResolution();
+        this.attachMapEvents();
+      }
+      return layer;
+    }
+
+    /**
+     * OpenLayers counts a refused image as loaded and never asks for it again, so
+     * a refused tile stays a hole and a refused view image stays an empty layer.
+     * The view image is kept on screen through the refusal (removeBackBuffer in
+     * createLayer) and whatever is missing is asked for again at the delays in
+     * IMAGE_RETRY_DELAYS - through mergeNewParams, because OpenLayers' tile
+     * manager keeps a refused draw in a queue that the layer's params event
+     * flushes, while a plain redraw would leave it there. A new map view and a
+     * delivered image start the attempts over.
+     * @param {any} layer layer built by createLayer
      * @param {{tried: number, timer: any, stamp: number|null, holding: boolean}} recovery its state
      */
     retryMissingImage(layer, recovery) {
@@ -385,9 +452,15 @@
       layer.events.on({
         // A delivered image ends the recovery. OpenLayers reports a refused image
         // as loaded as well, and marks that one; only the others count. It is also
-        // what ends the hold on the image the layer is showing.
+        // what ends the hold on the image the layer is showing. A layer of tiles
+        // starts over only once no tile of the current grid is missing: a tile
+        // that is still refused has to keep its pending retry, or a neighbour
+        // arriving a moment later would cancel the only request that can fill it.
         tileloaded: event => {
-          if (!event?.tile?.imgDiv?.classList?.contains('olImageLoadError')) {
+          if (event?.tile?.imgDiv?.classList?.contains('olImageLoadError')) return;
+          const missing = layer.grid?.some(row => row.some(tile =>
+            tile.imgDiv?.classList?.contains('olImageLoadError')));
+          if (!missing) {
             recovery.holding = false;
             restart();
           }
@@ -529,7 +602,6 @@
       this.refreshError = null;
 
       this.WMS_SERVICES = {
-        orto: "https://mapy.geoportal.gov.pl/wss/service/PZGIK/ORTO/WMS/StandardResolution?",
         orto_high: "https://mapy.geoportal.gov.pl/wss/service/PZGIK/ORTO/WMS/HighResolution?",
         osm: "https://mapy.geoportal.gov.pl/wss/ext/OSM/BaseMap/service?",
         adresy: "https://mapy.geoportal.gov.pl/wss/ext/KrajowaIntegracjaNumeracjiAdresowej?request=GetMap&",
@@ -539,6 +611,16 @@
         parcels: "https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaEwidencjiGruntow?",
         border_city: "https://mapy.geoportal.gov.pl/wss/service/PZGIK/PRG/WMS/AdministrativeBoundaries?REQUEST=GetMap&",
         kompozycja: "https://mapy.geoportal.gov.pl/wss/service/pub/guest/kompozycja_BDOT10k_WMS/MapServer/WMSServer"
+      };
+
+      // The standard ortho as tiles of the editor's own grid. The service has one
+      // Web Mercator matrix set (EPSG:3857, 256 px, levels 0-19) whose indices are
+      // the ordinary z/x/y of that grid, so these are literally the tiles the map
+      // is built from - a refused one is a hole, not a blank photo layer.
+      this.TILE_SERVICES = {
+        orto: "https://mapy.geoportal.gov.pl/wss/service/PZGIK/ORTO/WMTS/StandardResolution?" +
+          "SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ORTOFOTOMAPA&STYLE=default&FORMAT=image/jpeg" +
+          "&TILEMATRIXSET=EPSG:3857&TILEMATRIX=EPSG:3857:${z}&TILEROW=${y}&TILECOL=${x}"
       };
 
       this.CATEGORIES = {
@@ -709,10 +791,15 @@
     createLayersDefinition() {
       const usrRank = this.user?.rank ?? 0;
 
-      // One image per view: the ortho WMS answers whole batches of tile requests with
-      // an empty 404 page, so the photo layers ask for the current view in one request.
-      this.createWMSLayer("Geoportal - ortofoto", this.WMS_SERVICES.orto, "Raster", "image/jpeg", { singleTile: true, minZ: 0 });
-      this.createWMSLayer("Geoportal - ortofoto high res", this.WMS_SERVICES.orto_high, "Raster", "image/jpeg", { singleTile: true, minZ: 14 });
+      // The photo layers are the only ones that cover the whole view, so a refused
+      // image used to be the whole view - the editor's base map had nothing to
+      // show through. Both now come as tiles of the editor's own grid: the
+      // standard ortho straight from the Geoportal tile service (the same z/x/y
+      // tiles the map draws, levels 0-19), the high-res ortho cut into that grid
+      // on the client, because its service publishes no such tiles. A refused tile
+      // is one hole in the view, with the editor's base map behind it.
+      this.createTileLayer("Geoportal - ortofoto", this.TILE_SERVICES.orto, { maxZ: ORTO_TILE_MAX_ZOOM });
+      this.createWMSLayer("Geoportal - ortofoto high res", this.WMS_SERVICES.orto_high, "Raster", "image/jpeg", { singleTile: false, minZ: 14 });
 
       if (usrRank >= 1) {
         this.createWMSLayer("Geoportal - OSM", this.WMS_SERVICES.osm, "osm", "image/png");
@@ -752,9 +839,18 @@
     }
 
     createWMSLayer(name, url, layers, format = "image/png", options = {}) {
+      this.registerLayer(name, { name, url, layers, format, options }, options);
+    }
+
+    /** A layer fetched from a tile service as the editor's own z/x/y tiles. */
+    createTileLayer(name, url, options = {}) {
+      this.registerLayer(name, { name, url, options, kind: "wmts" }, options);
+    }
+
+    registerLayer(name, definition, options) {
       const integration = this;
       this.layers[name] = {
-        definition: { name, url, layers, format, options },
+        definition,
         hasOpacity: options.hasOpacity !== false,
         instance: null,
         opacity: this.settings.layerOpacity[name] ?? 1.0,

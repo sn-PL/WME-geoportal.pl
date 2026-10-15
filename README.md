@@ -1,6 +1,6 @@
 # Warstwy geoportal.gov.pl dla WME (WME SDK)
 
-Skrypt wyświetla warstwy z Geoportalu w edytorze Waze. Wyświetlane warstwy to: ortofotomapa ("podkład satelitarny"), numery domów i nazwy miejscowości. Wersja 1.5.5 (2026-10-15) korzysta z oficjalnego WME SDK (v2.374, tryb asynchroniczny) do inicjalizacji, odczytu stanu edytora i obsługi zdarzeń. Zachowuje dotychczasowy wygląd i położenie kontrolek w menu Warstwy.
+Skrypt wyświetla warstwy z Geoportalu w edytorze Waze. Wyświetlane warstwy to: ortofotomapa ("podkład satelitarny"), numery domów i nazwy miejscowości. Wersja 1.5.6 (2026-10-15) korzysta z oficjalnego WME SDK (v2.374, tryb asynchroniczny) do inicjalizacji, odczytu stanu edytora i obsługi zdarzeń. Zachowuje dotychczasowy wygląd i położenie kontrolek w menu Warstwy.
 
 Skrypt jest zbudowany na podstawie skryptu [geoportal.gov.pl layers for WME without translating PROXY](https://greasyfork.org/en/scripts/10611-geoportal-gov-pl-layers-for-wme-without-translating-proxy) autorstwa [Pawła Pyrczaka](https://greasyfork.org/en/users/9996-pawe%C5%82-pyrczak) oraz poprawek Stracha https://github.com/strah/WME-geoportal.pl oraz Kamila Maruda https://github.com/kmarud/WME-geoportal.pl
 
@@ -28,9 +28,16 @@ Do wyświetlania WMS potrzebne są nadal OpenLayers i `W.map.addLayer` (SDK obs�
 ### Kontrola po aktualizacji WME
 
 1. Otwórz WME i sprawdź **Warstwy → -- Geoportal PL --**, również po zamknięciu i ponownym otwarciu karty Warstwy.
-2. Włącz ortofoto i adresy; sprawdź wyrównanie po przesunięciu mapy oraz to, że odrzucone odświeżenie ortofoto nie zabiera z ekranu obrazu, który już się wczytał (widok nie może zniknąć — zostaje poprzedni), a także znikanie i powrót adresów poniżej i od zoomu 14.
+2. Włącz ortofoto i adresy; sprawdź, że kafelki ortofoto pokrywają się z mapą po przesunięciu mapy i przy przybliżeniu powyżej 19 (kafelek poziomu 19 jest rozciągany), że nieudany kafelek zostawia dziurę, przez którą widać podkład WME — a nie pusty widok — oraz znikanie i powrót adresów poniżej i od zoomu 14.
 3. Sprawdź suwaki, checkboxy i zachowanie ustawień po przeładowaniu WME.
 4. Jeśli panel się nie pojawia, sprawdź komunikaty `[Geoportal]` w konsoli przeglądarki.
+
+## Changelog [1.5.6] - 2026-10-15
+* **Ortofoto standardowa jako kafelki WME z usługi kafelkowej Geoportalu**: warstwa nie pobiera już jednego obrazu na cały widok, tylko te same kafelki, z których zbudowana jest mapa edytora. Usługa kafelkowa (WMTS StandardResolution) ma siatkę Web Mercator EPSG:3857, 256 px, poziomy 0–19, o indeksach zwykłego z/x/y liczonego od północno-zachodniego narożnika świata, więc warstwa prosi o kafelek dokładnie dla tej komórki siatki, którą rysuje mapa (`TILEMATRIX=EPSG:3857:{z}&TILEROW={y}&TILECOL={x}`). Odrzucony kafelek to dziura w jednym miejscu: reszta widoku zostaje na ekranie, a przez dziurę widać standardowy podkład WME. Nie ma już obrazu całego widoku, który po odrzuceniu pustoszał.
+* **Ortofoto high res na tej samej siatce, cięta po stronie klienta**: usługa HighResolution nie ma siatki 3857 (tylko EPSG:2180 i EPSG:4326 po 512 px), więc ta warstwa nadal korzysta z WMS, ale pobiera 256-px kafelki tej samej siatki co mapa (żądania `CRS=EPSG:4326` z BBOX-em pojedynczego kafelka, jak dotąd). Pojedyncze odrzucone żądanie to również dziura, a nie pusty widok.
+* **Powyżej poziomu 19**: usługa kafelkowa kończy się na poziomie 19, więc powyżej niego warstwa nadal pyta o kafelek 19 i rozciąga go na ekranie — przybliżenia 20+ pokazują to, co ta usługa ma — zamiast prosić o nieistniejące kafelki i zostawiać puste miejsce.
+* **Ponowienia i trzymanie obrazu bez zmian**: odrzucony kafelek wraca po 1 s i po 3 s (ze świeżym znacznikiem czasu w adresie), a warstwy, które nadal pobierają jeden obraz na widok (OSM, przejazdy kolejowe, drogi, kompozycje BDOT), trzymają na ekranie obraz, który już się wczytał — odrzucone odświeżenie nie zabiera im tego, co widać.
+* **Bez zmian wyglądu**: te same warstwy, kategorie, checkboxy, suwaki i zapisane ustawienia; adres usługi zmienia się tylko dla ortofoto standardowej, która zamiast zapytania WMS o obraz widoku używa usługi kafelkowej tego samego serwisu.
 
 ## Changelog [1.5.5] - 2026-10-15
 * **WME SDK v2.374**: SDK w zalecanym trybie asynchronicznym; wszystkie wywołania SDK obsługiwane przez `await`.
