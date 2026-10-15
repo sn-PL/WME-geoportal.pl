@@ -1,6 +1,6 @@
 # Warstwy geoportal.gov.pl dla WME (WME SDK)
 
-Skrypt wyświetla warstwy z Geoportalu w edytorze Waze. Wyświetlane warstwy to: ortofotomapa ("podkład satelitarny"), numery domów i nazwy miejscowości. Wersja 1.5.6 (2026-10-15) korzysta z oficjalnego WME SDK (v2.374, tryb asynchroniczny) do inicjalizacji, odczytu stanu edytora i obsługi zdarzeń. Zachowuje dotychczasowy wygląd i położenie kontrolek w menu Warstwy.
+Skrypt wyświetla warstwy z Geoportalu w edytorze Waze. Wyświetlane warstwy to: ortofotomapa ("podkład satelitarny"), numery domów i nazwy miejscowości. Wersja 1.5.7 (2026-10-15) korzysta z oficjalnego WME SDK (v2.374, tryb asynchroniczny) do inicjalizacji, odczytu stanu edytora i obsługi zdarzeń. Zachowuje dotychczasowy wygląd i położenie kontrolek w menu Warstwy.
 
 Skrypt jest zbudowany na podstawie skryptu [geoportal.gov.pl layers for WME without translating PROXY](https://greasyfork.org/en/scripts/10611-geoportal-gov-pl-layers-for-wme-without-translating-proxy) autorstwa [Pawła Pyrczaka](https://greasyfork.org/en/users/9996-pawe%C5%82-pyrczak) oraz poprawek Stracha https://github.com/strah/WME-geoportal.pl oraz Kamila Maruda https://github.com/kmarud/WME-geoportal.pl
 
@@ -31,6 +31,10 @@ Do wyświetlania WMS potrzebne są nadal OpenLayers i `W.map.addLayer` (SDK obs�
 2. Włącz ortofoto i adresy; sprawdź, że kafelki ortofoto pokrywają się z mapą po przesunięciu mapy i przy przybliżeniu powyżej 19 (kafelek poziomu 19 jest rozciągany), że nieudany kafelek zostawia dziurę, przez którą widać podkład WME — a nie pusty widok — oraz znikanie i powrót adresów poniżej i od zoomu 14.
 3. Sprawdź suwaki, checkboxy i zachowanie ustawień po przeładowaniu WME.
 4. Jeśli panel się nie pojawia, sprawdź komunikaty `[Geoportal]` w konsoli przeglądarki.
+
+## Changelog [1.5.7] - 2026-10-15
+* **Ortofoto high res: większe kafelki (512 px)**: ortofoto standardowa jest teraz szybsza od high res, bo korzysta z usługi kafelkowej Geoportalu (gotowe kafelki 256 px z pamięci podręcznej), a high res nie ma czegoś takiego — jego jedyne siatki kafelkowe to EPSG:2180 i EPSG:4326 (512 px, do poziomu 16), więc każdy kafelek tej warstwy renderuje serwer na żądanie, po jednym żądaniu na kafelek. Warstwa prosi więc teraz o kafelki 512 px tej samej siatki edytora zamiast 256 px: jedno żądanie pokrywa cztery komórki mapy, czyli ok. 4× mniej renderów na widok (przy widoku 1400×900 ok. 12 zamiast ok. 35), a wyrównanie do siatki mapy i zasada „odrzucony kafelek to dziura, nie pusty widok" zostają bez zmian. Większe kafelki poza tym lepiej wykorzystują pamięć podręczną przeglądarki przy przesuwaniu mapy.
+* **Ortofoto standardowa bez zmian**: zostaje na kafelkach usługi kafelkowej (256 px, poziomy 0–19, rozciąganie powyżej 19).
 
 ## Changelog [1.5.6] - 2026-10-15
 * **Ortofoto standardowa jako kafelki WME z usługi kafelkowej Geoportalu**: warstwa nie pobiera już jednego obrazu na cały widok, tylko te same kafelki, z których zbudowana jest mapa edytora. Usługa kafelkowa (WMTS StandardResolution) ma siatkę Web Mercator EPSG:3857, 256 px, poziomy 0–19, o indeksach zwykłego z/x/y liczonego od północno-zachodniego narożnika świata, więc warstwa prosi o kafelek dokładnie dla tej komórki siatki, którą rysuje mapa (`TILEMATRIX=EPSG:3857:{z}&TILEROW={y}&TILECOL={x}`). Odrzucony kafelek to dziura w jednym miejscu: reszta widoku zostaje na ekranie, a przez dziurę widać standardowy podkład WME. Nie ma już obrazu całego widoku, który po odrzuceniu pustoszał.
