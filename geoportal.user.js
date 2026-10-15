@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name            Geoportal Waze integration (fork by snPL)
-// @version         1.5.5
+// @version         1.6.0
 // @description     Dodaje warstwy geoportal.gov.pl ("podkład satelitarny", numery domów, nazwy miejscowości) do WME (integracja z WME SDK)
 // @include         https://*.waze.com/*/editor*
 // @include         https://*.waze.com/editor*
@@ -23,7 +23,7 @@
  */
 
 /* Changelog:
- *  1.5.9 - "Geoportal - OSM" comes from the OSM tile service as the editor's own z/x/y tiles instead of one image per view; the level crossings (Przejazdy) and the detailed BDOT layers come as tiles too, because those services refuse a whole-view render; the topographic objects (Krajowa Integracja BDOT) are requested in EPSG:2180, the only system the county services behind that integration answer in; the eight detailed BDOT layers (all of them road surface classes) are two layers - roads and road numbers - from zoom 17 up.
+ *  1.6.0 - OSM, the standard photo layer, the level crossings and the topographic objects come as tiles of the editor's own map - the last of them asked for in the coordinate system their county services use - because those services refuse a whole-window picture; the detailed BDOT switches are back as they were before 1.5.9, one per road class, each asking for a single picture of the view, because tiles turned one view into dozens of requests that the service answered in part with an empty response; and no view picture is asked for past about a megapixel, where those services stop answering.
  *  1.5.5 - WME SDK v2.374: async SDK mode; version-tolerant startup, events, zoom filtering and controls; photo layers request JPEG without the needless transparency flag, as one image per view instead of a tile grid (the ortho WMS answers whole tile batches with 404); a refused image is requested three times - once immediately, then twice at a growing distance - and a view image that OpenLayers gave up on is requested again instead of leaving the map empty.
  *  1.5.4 - Use SDK readiness, state and events; guard WMS and preserve the Layers menu.
  *  1.5.2 - New layer names address, streets WMS endpoint
@@ -47,7 +47,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = "1.5.9";
+  const SCRIPT_VERSION = "1.6.0";
   // WME SDK typings this version was checked against (wme-sdk-typings.tgz).
   const SDK_BASELINE = "v2.374-5-g0024d1fa65";
   const WAIT_TIMEOUT = 120000;
@@ -74,6 +74,10 @@
   // are the delays (ms) of the ones after it - past the burst that the front-end
   // refuses, and with a fresh timestamp so the answer cannot come from a cache.
   const IMAGE_RETRY_DELAYS = [1000, 3000];
+  // The map services answer a whole-view image only up to about a megapixel (past
+  // that they send a document or nothing at all), so a view image is asked for at
+  // the largest size that still comes back and stretched over the view.
+  const MAX_VIEW_PIXELS = 1200000;
   // Geodetic constants of EPSG:2180 (PUWG 1992): GRS80, transverse Mercator with
   // the scale factor 0.9993, central meridian 19°E and the usual false origin.
   const PUWG = { a: 6378137, f: 1 / 298.257222101, k0: 0.9993, meridian: 19, falseEasting: 500000, falseNorthing: -5300000 };
@@ -142,6 +146,21 @@
     const round = value => Math.round(value * 100) / 100;
     return [round(minN), round(minE), round(maxN), round(maxE)];
   }
+
+  // What the BDOT10k composition offers for roads: the surface classes of one and
+  // the same road network. A request carrying six of them at once never comes back
+  // as a picture, so each class (or pair of related classes) is a switch of its
+  // own, and the switches and the menu are built from this one list.
+  const BDOT_LAYERS = {
+    "BDOT - Gruntowa": "DrDGr,DrLGr",
+    "BDOT - Utwardzona": "JDrLNUt",
+    "BDOT - Twarda": "JDLNTw,JDrZTw",
+    "BDOT - Główna": "JDrG",
+    "BDOT - W budowie (Ekspr./Główna)": "DrEk",
+    "BDOT - Jezdnia (Ekspr./Główna)": "JDrEk",
+    "BDOT - Autostrada": "JAu",
+    "BDOT - Numer drogi": "NrDr"
+  };
 
   /** @typedef {import('wme-sdk-typings').AsyncWmeSDK} AsyncWmeSDK */
   /** @typedef {Parameters<import('wme-sdk-typings').WmeSDK['Events']['on']>[0]['eventName']} SdkEventName */
@@ -377,6 +396,19 @@
       return this.zoomLevel + Math.round(Math.log2(this.zoomResolution / resolution));
     }
 
+    /**
+     * The size to ask a service for: the size OpenLayers wants, shrunk to
+     * MAX_VIEW_PIXELS when it is larger (see that constant).
+     * @param {{w: number, h: number}} size
+     * @returns {{w: number, h: number}}
+     */
+    requestImageSize(size) {
+      const pixels = size.w * size.h;
+      if (pixels <= MAX_VIEW_PIXELS) return size;
+      const shrink = Math.sqrt(MAX_VIEW_PIXELS / pixels);
+      return { w: Math.round(size.w * shrink), h: Math.round(size.h * shrink) };
+    }
+
     createLayer(definition, opacity) {
       if (definition.kind === "wmts") return this.createTileLayer(definition, opacity);
       const { name, url, layers, format, options } = definition;
@@ -399,17 +431,23 @@
         {
           isBaseLayer: false, visibility: false,
           singleTile,
+          // How much of the map a single-tile layer renders. 1.5 is OpenLayers'
+          // own default (a view plus a margin, so small pans need no new image);
+          // 1 asks for the view itself, which is what the services that refuse a
+          // large render need (see MAX_VIEW_PIXELS).
+          ratio: options.ratio ?? 1.5,
           transitionEffect: "resize",
           noMagic: true, // never let OpenLayers rewrite the format
           getURL: function (bounds) {
             bounds = this.adjustBounds(bounds.clone());
-            const imageSize = this.getImageSize(bounds);
-            if (adapter.zoomAt((bounds.right - bounds.left) / imageSize.w) < minZoom) return null;
+            const asked = this.getImageSize(bounds);
+            if (adapter.zoomAt((bounds.right - bounds.left) / asked.w) < minZoom) return null;
             bounds.transform(adapter.sourceProjection, adapter.targetProjection);
             // WMS 1.3.0 / EPSG:4326 uses latitude, longitude axis order, while the
             // integrating service reads EPSG:2180 as northing, easting. As long as
             // the view image is missing, every request asks under a fresh address,
             // so no cache can answer it with the refused response.
+            const imageSize = adapter.requestImageSize(asked);
             const request = {
               BBOX: crs === "EPSG:2180" ? bounds2180(bounds) : bounds.toArray(true),
               WIDTH: imageSize.w, HEIGHT: imageSize.h
@@ -432,6 +470,18 @@
             return adapter.OL.Layer.Grid.prototype.removeBackBuffer.apply(this, arguments);
           }
         });
+      return this.installLayer(layer, recovery, opacity);
+    }
+
+    /**
+     * Put a built layer on the map and start watching it, and let the first one
+     * tell the adapter which map it is on.
+     * @param {any} layer layer built by createLayer or createTileLayer
+     * @param {{tried: number, timer: any, stamp: number|null, holding: boolean}} recovery its state
+     * @param {number} opacity
+     * @returns {any} the layer
+     */
+    installLayer(layer, recovery, opacity) {
       layer.setOpacity(opacity);
       this.map.addLayer(layer);
       this.retryMissingImage(layer, recovery);
@@ -491,15 +541,7 @@
           return recovery.stamp && tileUrl ? tileUrl + "&_=" + recovery.stamp : tileUrl;
         }
       });
-      layer.setOpacity(opacity);
-      this.map.addLayer(layer);
-      this.retryMissingImage(layer, recovery);
-      if (!this.olMap && layer.map) {
-        this.olMap = layer.map;
-        if (this.zoomResolution === null) this.zoomResolution = this.getMapResolution();
-        this.attachMapEvents();
-      }
-      return layer;
+      return this.installLayer(layer, recovery, opacity);
     }
 
     /**
@@ -712,7 +754,7 @@
         "Adresy i Ulice": ["Geoportal - adresy", "Geoportal - ulice", "Geoportal - place", "Geoportal - adresy, place i ulice w jednym"],
         "Podział Administracyjny": ["Geoportal - podział adm", "Geoportal - Miasta", "Geoportal - gminy", "Geoportal - powiaty", "Geoportal - województwa", "Geoportal - Granica PL"],
         "Topografia / Inne": ["Geoportal - drogi", "Geoportal - przejazdy kolejowe (wymagany duży zoom)", "Geoportal - obiekty topograficzne"],
-        "BDOT (Szczegółowa)": ["BDOT - drogi (szczegółowe)", "BDOT - numer drogi"]
+        "BDOT (Szczegółowa)": Object.keys(BDOT_LAYERS)
       };
 
       this.init();
@@ -913,15 +955,12 @@
       // comes back as an empty image, which is what the layer showed.
       this.createWMSLayer("Geoportal - obiekty topograficzne", this.WMS_SERVICES.topo, "bdot", "image/png", { singleTile: false, minZ: 16, crs: "EPSG:2180" });
 
-      // The BDOT10k composition draws road surfaces from about 1:10 000 up, and a
-      // whole-view request at that size does not come back at all (the service
-      // stops answering), so these are tiles of the editor's grid asked for from
-      // zoom 17. What the composition offers for roads are surface classes of one
-      // and the same road network - as eight switches each of them showed a slice
-      // of it, so the network is one layer and the road numbers another.
-      const bdotRoads = "DrDGr,DrLGr,JDrLNUt,JDLNTw,JDrZTw,JDrG,DrEk,JDrEk,JAu";
-      this.createWMSLayer("BDOT - drogi (szczegółowe)", this.WMS_SERVICES.kompozycja, bdotRoads, "image/png", { singleTile: false, minZ: 17 });
-      this.createWMSLayer("BDOT - numer drogi", this.WMS_SERVICES.kompozycja, "NrDr", "image/png", { singleTile: false, minZ: 17 });
+      // The composition draws these classes from about 1:10 000 up and stops
+      // answering a whole view past about a megapixel, so each switch asks for one
+      // image of the view itself (ratio 1) instead of OpenLayers' larger default.
+      Object.entries(BDOT_LAYERS).forEach(([name, classNames]) => {
+        this.createWMSLayer(name, this.WMS_SERVICES.kompozycja, classNames, "image/png", { minZ: 16, ratio: 1 });
+      });
     }
 
     createWMSLayer(name, url, layers, format = "image/png", options = {}) {
