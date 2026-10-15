@@ -1,75 +1,48 @@
 # Warstwy geoportal.gov.pl dla WME (WME SDK)
 
-Skrypt wyświetla warstwy z Geoportalu w edytorze Waze. Wyświetlane warstwy to: ortofotomapa ("podkład satelitarny"), numery domów i nazwy miejscowości. Wersja 1.6.0 (2026-10-15) korzysta z oficjalnego WME SDK (v2.374, tryb asynchroniczny) do inicjalizacji, odczytu stanu edytora i obsługi zdarzeń. Zachowuje dotychczasowy wygląd i położenie kontrolek w menu Warstwy.
+Skrypt wyświetla warstwy z Geoportalu w edytorze Waze: ortofotomapę („podkład satelitarny”), adresy i nazwy miejscowości, granice, drogi, przejazdy kolejowe, obiekty topograficzne oraz warstwy BDOT10k. Wersja 1.6.0 (2026-10-15) korzysta z oficjalnego WME SDK (v2.374, tryb asynchroniczny). Wygląd i położenie kontrolek w menu Warstwy bez zmian.
 
-Skrypt jest zbudowany na podstawie skryptu [geoportal.gov.pl layers for WME without translating PROXY](https://greasyfork.org/en/scripts/10611-geoportal-gov-pl-layers-for-wme-without-translating-proxy) autorstwa [Pawła Pyrczaka](https://greasyfork.org/en/users/9996-pawe%C5%82-pyrczak) oraz poprawek Stracha https://github.com/strah/WME-geoportal.pl oraz Kamila Maruda https://github.com/kmarud/WME-geoportal.pl
+Na podstawie skryptu [geoportal.gov.pl layers for WME without translating PROXY](https://greasyfork.org/en/scripts/10611-geoportal-gov-pl-layers-for-wme-without-translating-proxy) autorstwa [Pawła Pyrczaka](https://greasyfork.org/en/users/9996-pawe%C5%82-pyrczak) oraz poprawek Stracha https://github.com/strah/WME-geoportal.pl i Kamila Maruda https://github.com/kmarud/WME-geoportal.pl
 
-**Instalacja:** https://greasyfork.org/en/scripts/572377-geoportal-waze-integration-fork-by-snpl  
-
-Pliki źródłowe są dostępne na [Githubie](https://github.com/sn-PL/WME-geoportal.pl), zapraszam do forkowania/aktualizacji.
+**Instalacja:** https://greasyfork.org/en/scripts/572377-geoportal-waze-integration-fork-by-snpl
 
 ## Jak używać
 
-1. **Instalacja**: zainstaluj skrypt za pomocą menedżera skryptów (np. Tampermonkey).
-2. **Uruchomienie**: otwórz Waze Map Editor.
-3. **Warstwy**: w bocznym panelu "Warstwy" (pojawiającym się jako nowa karta) znajdziesz sekcję **"-- Geoportal PL --"**.
-4. **Włączanie**: kliknij checkbox lub przesuń suwak przezroczystości w prawo. Zmiana suwaka automatycznie aktywuje warstwę.
-5. **Przezroczystość**: suwak ustawiony na 0% automatycznie wyłącza warstwę.
-6. **Kategorie**: warstwy są pogrupowane w zwijane kategorie (Ortofoto, Adresy, Podział Adm, BDOT).
+1. Zainstaluj skrypt w menedżerze skryptów (np. Tampermonkey) i otwórz Waze Map Editor.
+2. W panelu „Warstwy”, w karcie **-- Geoportal PL --**, włącz wybrane warstwy checkboxem. Suwak ustawia przezroczystość (0% wyłącza warstwę), a ustawienia zapisują się same.
+3. Warstwy są pogrupowane w zwijane kategorie.
 
-## Zgodność z WME
+## Uwagi
 
-Skrypt korzysta z oficjalnego WME SDK w trybie asynchronicznym (zalecanym od v2.371), czeka na gotowość edytora i sprawdza wymagane metody SDK. Nie używa prywatnych API `W.loginManager`, `W.map.getZoom`, `W.map.events` ani globalnego Lodash. Widoczność i kolejność warstw są odświeżane zarówno na zdarzeniach SDK, jak i na zdarzeniach samej mapy, więc zmiana lub brak zdarzenia SDK nie zatrzymuje skryptu. Zgodności ze wszystkimi przyszłymi zmianami WME nie można zagwarantować.
-
-Do wyświetlania WMS potrzebne są nadal OpenLayers i `W.map.addLayer` (SDK obsługuje wyłącznie kafelki XYZ), a zachowanie obecnego układu kontrolek wymaga prywatnego DOM menu Warstwy i komponentu `wz-checkbox`; jeśli WME przestanie go udostępniać, po 30 sekundach pojawiają się zwykłe checkboxy o tym samym działaniu.
-
-[Dokumentacja WME SDK](https://www.waze.com/editor/sdk/)
-
-### Kontrola po aktualizacji WME
-
-1. Otwórz WME i sprawdź **Warstwy → -- Geoportal PL --**, również po zamknięciu i ponownym otwarciu karty Warstwy.
-2. Włącz ortofoto i adresy; sprawdź, że kafelki ortofoto pokrywają się z mapą po przesunięciu mapy i przy przybliżeniu powyżej 19 (kafelek poziomu 19 jest rozciągany), że nieudany kafelek zostawia dziurę, przez którą widać podkład WME — a nie pusty widok — oraz znikanie i powrót adresów poniżej i od zoomu 14.
-3. Sprawdź suwaki, checkboxy i zachowanie ustawień po przeładowaniu WME.
-4. Jeśli panel się nie pojawia, sprawdź komunikaty `[Geoportal]` w konsoli przeglądarki.
+* Warstwy BDOT10k, obiekty topograficzne i przejazdy kolejowe są rysowane w układzie 1992 (PUWG 1992) i mają dane tylko tam, gdzie publikuje je kompozycja BDOT10k, powiat (obiekty topograficzne) albo operator linii kolejowej.
+* Skrypt opiera się na WME SDK oraz na OpenLayers i prywatnym DOM menu Warstwy; przyszłe zmiany WME mogą wymagać aktualizacji (komunikaty `[Geoportal]` w konsoli przeglądarki).
 
 ## Changelog [1.6.0] - 2026-10-15
-* **„Geoportal - OSM" na kafelki**: warstwa pobiera teraz kafelki tej samej siatki co mapa edytora, więc przesuwanie mapy pokazuje nowe fragmenty od razu, a nieudany kafelek to jedna dziura, przez którą widać podkład WME — a nie pusta warstwa.
-* **„Geoportal - przejazdy kolejowe" znowu coś pokazuje**: usługa przejazdów odrzuca obraz większy niż mniej więcej 1200×900 punktów, czyli na typowym oknie WME odsyła dokument błędu zamiast obrazka — dlatego warstwa była pusta. Teraz pobiera małe kafelki i działa na każdym rozmiarze okna. Nazwy warstw operatorów i próg zoomu (15) bez zmian.
-* **„Geoportal - obiekty topograficzne" w układzie 1992 (PUWG 1992)**: ta warstwa to zbiór map powiatowych, a te rozumieją tylko ten układ — pytane w innym zostawały puste. Dane są tylko w powiatach, które je opublikowały (w Wielkopolsce np. w powiecie poznańskim, ale nie w samym Poznaniu).
-* **„BDOT (Szczegółowa)" wraca do ośmiu przełączników**: kompozycja BDOT10k rysuje drogi dopiero od ok. 1:10 000 i nie odpowiada, gdy w jednym zapytaniu jest sześć klas naraz, dlatego każda klasa (gruntowa, utwardzona, twarda, główna, w budowie, jezdnia, autostrada) i numery dróg mają znowu własny przełącznik, od zoomu 16. Każdy pobiera jeden obraz na widok — kafelki zamieniały jeden widok na kilkadziesiąt żądań, po których serwis gubił część odpowiedzi (błędy w konsoli).
-* **Bez zmian**: pozostałe warstwy, adresy usług, kategorie, checkboxy, suwaki i zapisane ustawienia.
+
+* **BDOT i przejazdy w układzie 1992**: kompozycja BDOT10k rysuje dane tylko w tym układzie — pytana w 4326 zwracała dla każdego miejsca kraju ten sam obrazek błędu, który zakrywał mapę („szare pola”).
+* **Suwaki BDOT usunięte**: każda warstwa BDOT jest tylko włączana checkboxem i rysuje się w pełnej nieprzezroczystości.
+* **OSM, ortofoto, przejazdy i obiekty topograficzne na kafelkach**: nieudany kafelek to jedna dziura, przez którą widać podkład WME, a nie pusta warstwa albo obraz błędu na cały widok.
+* **Bez zmian**: pozostałe warstwy, kategorie, checkboxy, suwaki i zapisane ustawienia.
 
 ## Changelog [1.5.8] - 2026-10-15
-* **Ortofoto high res: powrót do kafelków 256 px**: 1.5.7 zwiększyło kafelek tej warstwy do 512 px, żeby ograniczyć liczbę żądań do usługi renderującej. W praktyce wyszło wolniej — żądanie jest wtedy 4× większym renderem, a przeglądarka pobiera z jednego hosta tylko kilka żądań naraz, więc widok zapełnia się później niż przy większej liczbie mniejszych kafli. Warstwa wraca do 256 px (dla widoku 1400×900 ok. 35 mniejszych żądań zamiast ok. 12 dużych), z wyrównaniem do siatki mapy i dziurą wielkości komórki mapy bez zmian. Wersja 1.5.7 nie została wydana osobno — zmieniała tylko ten rozmiar kafelka.
-* **Ortofoto standardowa bez zmian**: zostaje na kafelkach usługi kafelkowej (256 px, poziomy 0–19, rozciąganie powyżej 19).
+
+* **Ortofoto high res: powrót do kafelków 256 px** — 512 px było w praktyce wolniejsze.
 
 ## Changelog [1.5.6] - 2026-10-15
-* **Ortofoto standardowa jako kafelki WME z usługi kafelkowej Geoportalu**: warstwa nie pobiera już jednego obrazu na cały widok, tylko te same kafelki, z których zbudowana jest mapa edytora. Usługa kafelkowa (WMTS StandardResolution) ma siatkę Web Mercator EPSG:3857, 256 px, poziomy 0–19, o indeksach zwykłego z/x/y liczonego od północno-zachodniego narożnika świata, więc warstwa prosi o kafelek dokładnie dla tej komórki siatki, którą rysuje mapa (`TILEMATRIX=EPSG:3857:{z}&TILEROW={y}&TILECOL={x}`). Odrzucony kafelek to dziura w jednym miejscu: reszta widoku zostaje na ekranie, a przez dziurę widać standardowy podkład WME. Nie ma już obrazu całego widoku, który po odrzuceniu pustoszał.
-* **Ortofoto high res na tej samej siatce, cięta po stronie klienta**: usługa HighResolution nie ma siatki 3857 (tylko EPSG:2180 i EPSG:4326 po 512 px), więc ta warstwa nadal korzysta z WMS, ale pobiera 256-px kafelki tej samej siatki co mapa (żądania `CRS=EPSG:4326` z BBOX-em pojedynczego kafelka, jak dotąd). Pojedyncze odrzucone żądanie to również dziura, a nie pusty widok.
-* **Powyżej poziomu 19**: usługa kafelkowa kończy się na poziomie 19, więc powyżej niego warstwa nadal pyta o kafelek 19 i rozciąga go na ekranie — przybliżenia 20+ pokazują to, co ta usługa ma — zamiast prosić o nieistniejące kafelki i zostawiać puste miejsce.
-* **Ponowienia i trzymanie obrazu bez zmian**: odrzucony kafelek wraca po 1 s i po 3 s (ze świeżym znacznikiem czasu w adresie), a warstwy, które nadal pobierają jeden obraz na widok (OSM, przejazdy kolejowe, drogi, kompozycje BDOT), trzymają na ekranie obraz, który już się wczytał — odrzucone odświeżenie nie zabiera im tego, co widać.
-* **Bez zmian wyglądu**: te same warstwy, kategorie, checkboxy, suwaki i zapisane ustawienia; adres usługi zmienia się tylko dla ortofoto standardowej, która zamiast zapytania WMS o obraz widoku używa usługi kafelkowej tego samego serwisu.
+
+* **Ortofoto na kafelkach siatki mapy** — standardowa z usługi kafelkowej, high res cięta na kafelki po stronie przeglądarki; nieudany kafelek to dziura w widoku.
 
 ## Changelog [1.5.5] - 2026-10-15
-* **WME SDK v2.374**: SDK w zalecanym trybie asynchronicznym; wszystkie wywołania SDK obsługiwane przez `await`.
-* **Odporność na aktualizacje WME**: gotowość edytora ze zdarzenia i ze stanu SDK, opcjonalne zdarzenia i dane użytkownika (bez nich wypada tylko warstwa OSM), wersje WME i SDK w konsoli, zapasowe checkboxy i izolacja błędów obsługi zdarzeń.
-* **Wydajność**: koniec z odpytywaniem co 5 s — widoczność i kolejność warstw są odświeżane na zdarzeniach SDK oraz samej mapy, a samo przesuwanie mapy nie wykonuje żadnych wywołań SDK.
-* **Zoom**: kafelki poniżej minimalnego przybliżenia są blokowane od razu, także przed zdarzeniem SDK.
-* **Ortofoto w JPEG**: warstwy fotograficzne wysyłają żądania w formacie JPEG i bez parametru przezroczystości, dokładnie jak w wersjach 0.2.15 i w innych klientach tej usługi. Od 1.5.0 skrypt prosił o przezroczystość, czego OpenLayers nie mógł spełnić i po cichu podmieniał JPEG na PNG, przez co kafelki ortofoto były wielokrotnie cięższe.
-* **Ortofoto: jedno żądanie na widok**: obie warstwy fotograficzne pobierają jeden obraz na cały widok mapy zamiast siatki kafli — usługa ortofotomapy standardowej odpowiada losowo pustą stroną (404), więc pojedyncze żądanie to o rząd wielkości mniej błędów w konsoli. Nieudany obraz jest ponawiany 3 razy: raz od razu, a gdy OpenLayers i tak uzna go za wczytany — dwa razy po 1 s i po 3 s, ze świeżym znacznikiem czasu w adresie, czyli już po serii odrzuceń. Odrzucone odświeżenie nie zabiera przy tym obrazu, który już jest na ekranie: OpenLayers wyrzuca poprzedni obraz, gdy tylko uzna nowy za wczytany (a odrzucenie też uznaje za wczytane), więc skrypt trzyma dostarczony widok do chwili, gdy naprawdę przyjdzie nowy, i puszcza go, gdy warstwa zostaje ukryta. Bez tego nieudany obraz zostawał na mapie jako wczytany i widok pustoszał aż do następnego większego przesunięcia lub zmiany przybliżenia; teraz obraz wraca sam, a kolejka ponowień otwiera się na nowo przy każdym przesunięciu mapy, każdej zmianie przybliżenia i po każdym wczytanym obrazie.
-* **Kolejność warstw**: przywracanie z-index po dodaniu, usunięciu lub przestawieniu warstw mapy.
-* **Komunikat pod warstwami**: po polsku (w 1.5.4 był po angielsku).
-* **Bez zmian wyglądu**: te same warstwy, adresy usług WMS, kategorie, checkboxy, suwaki i zapisane ustawienia.
+
+* **WME SDK v2.374** w trybie asynchronicznym i odświeżanie widoczności na zdarzeniach (bez odpytywania).
+* **Odrzucony obraz wraca** (ponowienia 1 s i 3 s), a warstwy jednobrazowe trzymają na ekranie obraz, który już się wczytał.
+* **Ortofoto w JPEG** i jedno żądanie na widok zamiast siatki kafli.
 
 ## Changelog [1.5.4] - 2026-10-14
-* **WME SDK**: inicjalizacja, stan użytkownika i zdarzenia mapy przez SDK.
-* **Bez zmian wyglądu**: dotychczasowe kontrolki pozostają w menu Warstwy; obsługa ponownego tworzenia karty i zdarzeń checkboxów.
-* **Odporność**: sprawdzanie wymaganych API, odizolowane adaptery WMS i menu oraz komunikaty o niezgodności.
-* **Zoom SDK**: natychmiastowa aktualizacja widoczności i sprawdzanie bieżącego zoomu przy żądaniu kafelków, również przed zdarzeniem SDK.
+
+* **WME SDK**: inicjalizacja, stan użytkownika i zdarzenia mapy przez SDK; izolacja błędów i zapasowe checkboxy.
 
 ## Changelog [1.5.0] - 2026-04-03
-*   **Wsparcie API Marzec 2026**: kompatybilność z nowym systemem kart ("Draggable Cards").
-*   **MutationObserver**: zwiększenie stabilności renderowania menu przez WME.
-*   **Nowy interfejs UI**: suwaki przezroczystości pod nazwami warstw, obsługa Dark Mode.
-*   **Wydajność**: lazy loading (ładowanie tylko włączonych warstw) oraz filtracja poziomów przybliżenia.
-*   **Pamięć ustawień**: automatyczne zapisywanie włączonych warstw i przezroczystości.
+
+*   **Nowy interfejs WME** („Draggable Cards”), suwaki przezroczystości, zapis ustawień, tryb ciemny.
+*   **Wydajność**: ładowanie tylko włączonych warstw i filtrowanie poziomów przybliżenia.

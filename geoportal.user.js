@@ -23,7 +23,7 @@
  */
 
 /* Changelog:
- *  1.6.0 - OSM, the standard photo layer, the level crossings and the topographic objects come as tiles of the editor's own map - the last of them asked for in the coordinate system their county services use - because those services refuse a whole-window picture; the detailed BDOT switches are back as they were before 1.5.9, one per road class, each asking for a single picture of the view, because tiles turned one view into dozens of requests that the service answered in part with an empty response; and no view picture is asked for past about a megapixel, where those services stop answering.
+ *  1.6.0 - OSM, the standard photo layer, the level crossings and the topographic objects come as tiles of the editor's own map, because those services refuse a whole-window picture; the detailed BDOT switches are back, one picture of the view each, and they ask in EPSG:2180, the system that composition draws in (in 4326 it answered every window with the same picture of the error); the BDOT switches have no opacity slider any more; and no view picture is asked for past about a megapixel.
  *  1.5.5 - WME SDK v2.374: async SDK mode; version-tolerant startup, events, zoom filtering and controls; photo layers request JPEG without the needless transparency flag, as one image per view instead of a tile grid (the ortho WMS answers whole tile batches with 404); a refused image is requested three times - once immediately, then twice at a growing distance - and a view image that OpenLayers gave up on is requested again instead of leaving the map empty.
  *  1.5.4 - Use SDK readiness, state and events; guard WMS and preserve the Layers menu.
  *  1.5.2 - New layer names address, streets WMS endpoint
@@ -891,15 +891,7 @@
                 }
                 .geoportal-opacity-slider:hover { opacity: 1; }
                 .geoportal-opacity-value { font-size: 10px; color: #888; width: 22px; text-align: right; }
-                
-                .geoportal-info {
-                    font-size: 0.75em;
-                    color: #888;
-                    font-style: italic;
-                    margin-top: 12px;
-                    padding: 0 4px;
-                    line-height: 1.3;
-                }
+
                 .geoportal-native-checkbox { display: flex; align-items: center; gap: 8px; cursor: pointer; }
 
                 /* OpenLayers shows the element of a refused image again (empty,
@@ -938,7 +930,8 @@
       // 1200x900 px and from some size between that and 1400x900 it sends back an
       // error document instead of a picture - which is why the layer used to come
       // out empty on a normal screen. As tiles of the editor's grid every request
-      // is one small cell and each of them is a hole at worst.
+      // is one small cell and each of them is a hole at worst. It draws in
+      // EPSG:4326, which is what the map itself speaks (see the note above it).
       this.createWMSLayer("Geoportal - przejazdy kolejowe (wymagany duży zoom)", this.WMS_SERVICES.rail, "PMT_Linie_Kolejowe_Sp__z_o_o_,Kopalnia_Piasku_KOTLARNIA_-_Linie_Kolejowe_Sp__z__o_o_,Jastrzębska_Spółka_Kolejowa_Sp__z_o_o_,Infra_SILESIA_S_A_,EUROTERMINAL_Sławków_Sp__z_o_o_,Dolnośląska_Służba_Dróg_i_Kolei_we_Wrocławiu,CARGOTOR_Sp__z_o_o_,PKP_SKM_w_Trójmieście_Sp__z_o_o_,PKP_Linia_Hutnicza_Szerokotorowa_Sp__z_o__o_,PKP_Polskie_Linie_Kolejowe", "image/png", { singleTile: false, minZ: 15 });
       this.createWMSLayer("Geoportal - drogi", this.WMS_SERVICES.mileage, "planowane,wbudowie,pikietaz,drugorzedne,glowne,ekspresowe,autostrady", "image/png", { minZ: 12 });
       this.createWMSLayer("Geoportal - podział adm", this.WMS_SERVICES.parcels, "dzialki,numery_dzialek", "image/png", { singleTile: false, minZ: 15, hasOpacity: false });
@@ -955,11 +948,14 @@
       // comes back as an empty image, which is what the layer showed.
       this.createWMSLayer("Geoportal - obiekty topograficzne", this.WMS_SERVICES.topo, "bdot", "image/png", { singleTile: false, minZ: 16, crs: "EPSG:2180" });
 
-      // The composition draws these classes from about 1:10 000 up and stops
-      // answering a whole view past about a megapixel, so each switch asks for one
-      // image of the view itself (ratio 1) instead of OpenLayers' larger default.
+      // The composition draws these classes from about 1:10 000 up, and it draws
+      // them in the national system EPSG:2180: asked in 4326 it answers one and
+      // the same picture for every piece of the country, i.e. no data at all.
+      // It also stops answering a whole view past about a megapixel, so each
+      // switch asks for one image of the view itself (ratio 1) instead of
+      // OpenLayers' larger default, and none of them has an opacity slider.
       Object.entries(BDOT_LAYERS).forEach(([name, classNames]) => {
-        this.createWMSLayer(name, this.WMS_SERVICES.kompozycja, classNames, "image/png", { minZ: 16, ratio: 1 });
+        this.createWMSLayer(name, this.WMS_SERVICES.kompozycja, classNames, "image/png", { minZ: 16, ratio: 1, crs: "EPSG:2180", hasOpacity: false });
       });
     }
 
@@ -974,11 +970,14 @@
 
     registerLayer(name, definition, options) {
       const integration = this;
+      const hasOpacity = options.hasOpacity !== false;
       this.layers[name] = {
         definition,
-        hasOpacity: options.hasOpacity !== false,
+        hasOpacity,
         instance: null,
-        opacity: this.settings.layerOpacity[name] ?? 1.0,
+        // A layer without a slider always draws at full opacity, so a value left
+        // over in the settings from a version that had one cannot dim it.
+        opacity: hasOpacity ? (this.settings.layerOpacity[name] ?? 1.0) : 1.0,
         isEnabled: this.settings.enabledLayers[name] ?? false,
         updateVisibility: function () {
           const visible = this.isEnabled && integration.zoom !== null &&
