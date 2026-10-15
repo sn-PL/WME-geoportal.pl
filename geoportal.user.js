@@ -23,7 +23,7 @@
  */
 
 /* Changelog:
- *  1.6.0 - OSM, the standard photo layer, the level crossings and the topographic objects come as tiles of the editor's own map, because those services refuse a whole-window picture; the crossings and the detailed BDOT switches ask in EPSG:2180, the system those services draw in - asked in 4326 they answer with a picture of their own error instead of the data (drawn into the image, because OpenLayers asks a WMS for INIMAGE exceptions); the overlays drawn in thin dark lines ("Topografia / Inne") get a white halo and a lift of brightness instead of an opacity slider, and so do the BDOT switches; and no view picture is asked for past about a megapixel.
+ *  1.6.0 - OSM, the standard photo layer, the level crossings and the topographic objects come as tiles of the editor's own map, because those services refuse a whole-window picture; the crossings and the detailed BDOT switches ask in EPSG:2180, the system those services draw in - asked in 4326 they answer with a picture of their own error instead of the data (drawn into the image, because OpenLayers asks a WMS for INIMAGE exceptions); every service is now asked for its errors as documents instead of pictures, so a failure leaves a hole in the layer instead of a grey plate of text on the map; the overlays drawn in thin dark lines ("Topografia / Inne") get a white halo and a lift of brightness instead of an opacity slider, and so do the BDOT switches; and no view picture is asked for past about a megapixel.
  *  1.5.5 - WME SDK v2.374: async SDK mode; version-tolerant startup, events, zoom filtering and controls; photo layers request JPEG without the needless transparency flag, as one image per view instead of a tile grid (the ortho WMS answers whole tile batches with 404); a refused image is requested three times - once immediately, then twice at a growing distance - and a view image that OpenLayers gave up on is requested again instead of leaving the map empty.
  *  1.5.4 - Use SDK readiness, state and events; guard WMS and preserve the Layers menu.
  *  1.5.2 - New layer names address, streets WMS endpoint
@@ -431,7 +431,14 @@
       // and OpenLayers answered it by switching their JPEG to PNG. Only the PNG
       // overlays ask for it, so the requests stay as they were before 1.5.0.
       /** @type {Record<string, string>} */
-      const params = { layers, format, version: "1.3.0" };
+      // Ask for the service's own errors as documents, not as pictures. Asked the
+      // WMS way (INIMAGE, which is what OpenLayers asks for by default) a failing
+      // service paints its error into the image and that picture lands on the map:
+      // the grey plate with "Invalid CRS given" or "Error HRESULT E_FAIL has been
+      // returned from a call to a COM component." A document is not an image, so
+      // the cell stays a hole - as if the tile were never delivered - and the
+      // recovery below asks again.
+      const params = { layers, format, version: "1.3.0", exceptions: "XML" };
       if (format !== "image/jpeg") params.transparent = "true";
       const layer = new this.OL.Layer.WMS(name, url, params,
         {

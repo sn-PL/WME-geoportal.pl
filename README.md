@@ -22,6 +22,7 @@ Na podstawie skryptu [geoportal.gov.pl layers for WME without translating PROXY]
 * **BDOT i przejazdy w układzie 1992**: te usługi rysują dane tylko w tym układzie — pytane w 4326 zwracały obrazek własnego błędu, który zakrywał mapę („szare pola”, „Invalid CRS given (EPSG:4326).”).
 * **„Topografia / Inne” bez suwaków i czytelniejsze**: drogi, przejazdy i obiekty topograficzne mają sam checkbox, a cienkie ciemne linie i teksty dostają białą obwódkę i podbitą jasność, więc widać je na ciemnym podkładzie.
 * **Suwaki BDOT usunięte**: każda warstwa BDOT jest tylko włączana checkboxem i rysuje się w pełnej nieprzezroczystości.
+* **Błąd usługi to dziura, nie obrazek**: gdy usługa zwróci własny błąd, w tym miejscu nie pojawia się już szary obrazek z komunikatem („Invalid CRS given…”, „Error HRESULT E_FAIL…”), tylko pominięte miejsce, o które skrypt zapyta jeszcze raz.
 * **OSM, ortofoto, przejazdy i obiekty topograficzne na kafelkach**: nieudany kafelek to jedna dziura, przez którą widać podkład WME, a nie pusta warstwa albo obraz błędu na cały widok.
 * **Bez zmian**: pozostałe warstwy, kategorie, checkboxy, suwaki i zapisane ustawienia.
 * **Ostrzeżenie**: usługi obiektów topograficznych i przejazdów mają dane tylko dla części kraju i tylko od pewnego przybliżenia.
