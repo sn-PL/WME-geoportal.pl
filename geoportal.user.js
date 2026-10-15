@@ -23,7 +23,7 @@
  */
 
 /* Changelog:
- *  1.5.5 - WME SDK v2.374: async SDK mode; version-tolerant startup, events, zoom filtering and controls; photo layers request JPEG without the needless transparency flag, as one image per view instead of a tile grid (the ortho WMS answers whole tile batches with 404); a refused image is requested up to three more times.
+ *  1.5.5 - WME SDK v2.374: async SDK mode; version-tolerant startup, events, zoom filtering and controls; photo layers request JPEG without the needless transparency flag, as one image per view instead of a tile grid (the ortho WMS answers whole tile batches with 404); a refused image is requested three times - once immediately, then twice at a growing distance - and a view image that OpenLayers gave up on is requested again instead of leaving the map empty.
  *  1.5.4 - Use SDK readiness, state and events; guard WMS and preserve the Layers menu.
  *  1.5.2 - New layer names address, streets WMS endpoint
  *  1.5.1 - Allow selective opacity sliders (checkbox-only for boundaries/addresses).
@@ -59,6 +59,13 @@
     Map: ['getZoomLevel'],
     Events: ['on']
   };
+  // A refused image is not requested again by OpenLayers: it counts as loaded and
+  // the layer stays empty until the next big pan or zoom, while a photo layer
+  // carries the whole view in one image. The first re-request is OpenLayers' own
+  // (IMAGE_RELOAD_ATTEMPTS, set where the WMS layer is built); these are the
+  // delays (ms) of the ones after it - past the burst that the front-end refuses,
+  // and with a fresh timestamp so the answer cannot come from a cache.
+  const IMAGE_RETRY_DELAYS = [1000, 3000];
 
   /** @typedef {import('wme-sdk-typings').AsyncWmeSDK} AsyncWmeSDK */
   /** @typedef {Parameters<import('wme-sdk-typings').WmeSDK['Events']['on']>[0]['eventName']} SdkEventName */
@@ -244,12 +251,12 @@
             typeof OL?.Layer?.Grid?.prototype?.getFullRequestString !== 'function' ||
             !methods.every(method => typeof OL.Layer.WMS.prototype[method] === 'function') ||
             typeof map?.addLayer !== 'function') return null;
-        // The ortho WMS refuses part of the valid GetMap requests in bursts: the
-        // front-end replies with an empty 404 page and the refusal passes within
-        // seconds. OpenLayers re-requests the same image while the tile's reload
-        // counter stays within this limit (zero by default), which is what such
-        // short-lived refusals need.
-        OL.IMAGE_RELOAD_ATTEMPTS = 3;
+        // The ortho front-end refuses part of the valid GetMap requests in bursts
+        // with an empty 404 page. One immediate re-request is what such a
+        // short-lived refusal needs; the refused images that remain are picked up
+        // by IMAGE_RETRY_DELAYS. The limit is a global OpenLayers setting and is
+        // zero by default.
+        OL.IMAGE_RELOAD_ATTEMPTS = 1;
         return new WmsAdapter(OL, map);
       } catch (error) {
         return null;
@@ -262,6 +269,7 @@
       this.olMap = null; // OpenLayers map holding our layers, known after the first one is added.
       this.mapHandlers = null; // callbacks to run on the map's own events
       this.watching = false; // the map's events are hooked
+      this.recoveries = []; // image-recovery resets, one per WMS layer
       this.zoomLevel = null;
       this.zoomResolution = null;
       this.sourceProjection = new OL.Projection("EPSG:900913");
@@ -296,6 +304,8 @@
     createLayer({ name, url, layers, format, options }, opacity) {
       const adapter = this;
       const minZoom = options.minZ ?? 0;
+      // State of this layer's image recovery, shared with retryMissingImage.
+      const recovery = { tried: 0, timer: null, stamp: null };
       // The photo layers are opaque mosaics: transparency is a contradiction there
       // and OpenLayers answered it by switching their JPEG to PNG. Only the PNG
       // overlays ask for it, so the requests stay as they were before 1.5.0.
@@ -313,10 +323,12 @@
             const imageSize = this.getImageSize(bounds);
             if (adapter.zoomAt((bounds.right - bounds.left) / imageSize.w) < minZoom) return null;
             bounds.transform(adapter.sourceProjection, adapter.targetProjection);
-            // WMS 1.3.0 / EPSG:4326 uses latitude, longitude axis order.
-            return this.getFullRequestString({
-              BBOX: bounds.toArray(true), WIDTH: imageSize.w, HEIGHT: imageSize.h
-            });
+            // WMS 1.3.0 / EPSG:4326 uses latitude, longitude axis order. As long as
+            // the view image is missing, every request asks under a fresh address,
+            // so no cache can answer it with the refused response.
+            const request = { BBOX: bounds.toArray(true), WIDTH: imageSize.w, HEIGHT: imageSize.h };
+            if (recovery.stamp) request._ = recovery.stamp;
+            return this.getFullRequestString(request);
           },
           getFullRequestString: function () {
             this.params.CRS = "EPSG:4326";
@@ -325,12 +337,52 @@
         });
       layer.setOpacity(opacity);
       this.map.addLayer(layer);
+      this.retryMissingImage(layer, recovery);
       if (!this.olMap && layer.map) {
         this.olMap = layer.map;
         if (this.zoomResolution === null) this.zoomResolution = this.getMapResolution();
         this.attachMapEvents();
       }
       return layer;
+    }
+
+    /**
+     * A layer OpenLayers gave up on stays empty until the next big pan or zoom: the
+     * failed image counts as loaded, the front-end refusals are short-lived, and a
+     * photo layer carries the whole view in one image, so that empty layer is the
+     * whole map. Ask for the view again at the delays in IMAGE_RETRY_DELAYS -
+     * through mergeNewParams, because OpenLayers' tile manager keeps a refused
+     * draw in a queue that the layer's params event flushes, while a plain redraw
+     * would leave it there. A new map view and a delivered image start the
+     * attempts over.
+     * @param {any} layer WMS layer built by createLayer
+     * @param {{tried: number, timer: any, stamp: number|null}} recovery its state
+     */
+    retryMissingImage(layer, recovery) {
+      const restart = () => {
+        recovery.tried = 0;
+        recovery.stamp = null;
+        clearTimeout(recovery.timer);
+        recovery.timer = null;
+      };
+      const recover = () => {
+        recovery.timer = null;
+        if (!layer.visibility) return;
+        layer.mergeNewParams({});
+      };
+      this.recoveries.push(restart);
+      layer.events.on({
+        // A delivered image ends the recovery. OpenLayers reports a refused image
+        // as loaded as well, and marks that one; only the others count.
+        tileloaded: event => {
+          if (!event?.tile?.imgDiv?.classList?.contains('olImageLoadError')) restart();
+        },
+        tileerror: () => {
+          recovery.stamp = Date.now();
+          if (recovery.timer || recovery.tried >= IMAGE_RETRY_DELAYS.length) return;
+          recovery.timer = setTimeout(recover, IMAGE_RETRY_DELAYS[recovery.tried++]);
+        }
+      });
     }
 
     /**
@@ -356,6 +408,9 @@
       if (typeof events?.on !== 'function' ||
           typeof onZoom !== 'function' || typeof onLayers !== 'function') return;
       events.on({
+        // A new view gets a fresh set of image-recovery attempts. movestart,
+        // not moveend: the requests of that view are built before the move ends.
+        movestart: () => this.recoveries.forEach(reset => reset()),
         moveend: onZoom,
         addlayer: onLayers,
         removelayer: onLayers,
