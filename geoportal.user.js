@@ -23,7 +23,7 @@
  */
 
 /* Changelog:
- *  1.5.5 - WME SDK v2.374: async SDK mode; version-tolerant startup, events, zoom filtering and controls; photo layers request JPEG without the needless transparency flag.
+ *  1.5.5 - WME SDK v2.374: async SDK mode; version-tolerant startup, events, zoom filtering and controls; photo layers request JPEG without the needless transparency flag, as one image per view instead of a tile grid (the ortho WMS answers whole tile batches with 404).
  *  1.5.4 - Use SDK readiness, state and events; guard WMS and preserve the Layers menu.
  *  1.5.2 - New layer names address, streets WMS endpoint
  *  1.5.1 - Allow selective opacity sliders (checkbox-only for boundaries/addresses).
@@ -615,8 +615,10 @@
     createLayersDefinition() {
       const usrRank = this.user?.rank ?? 0;
 
-      this.createWMSLayer("Geoportal - ortofoto", this.WMS_SERVICES.orto, "Raster", "image/jpeg", { singleTile: false, minZ: 0 });
-      this.createWMSLayer("Geoportal - ortofoto high res", this.WMS_SERVICES.orto_high, "Raster", "image/jpeg", { singleTile: false, minZ: 14 });
+      // One image per view: the ortho WMS answers whole batches of tile requests with
+      // an empty 404 page, so the photo layers ask for the current view in one request.
+      this.createWMSLayer("Geoportal - ortofoto", this.WMS_SERVICES.orto, "Raster", "image/jpeg", { singleTile: true, minZ: 0 });
+      this.createWMSLayer("Geoportal - ortofoto high res", this.WMS_SERVICES.orto_high, "Raster", "image/jpeg", { singleTile: true, minZ: 14 });
 
       if (usrRank >= 1) {
         this.createWMSLayer("Geoportal - OSM", this.WMS_SERVICES.osm, "osm", "image/png");
