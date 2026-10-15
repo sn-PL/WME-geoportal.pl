@@ -1,6 +1,6 @@
 # Warstwy geoportal.gov.pl dla WME (WME SDK)
 
-Skrypt wyświetla warstwy z Geoportalu w edytorze Waze. Wyświetlane warstwy to: ortofotomapa ("podkład satelitarny"), numery domów i nazwy miejscowości. Wersja 1.5.7 (2026-10-15) korzysta z oficjalnego WME SDK (v2.374, tryb asynchroniczny) do inicjalizacji, odczytu stanu edytora i obsługi zdarzeń. Zachowuje dotychczasowy wygląd i położenie kontrolek w menu Warstwy.
+Skrypt wyświetla warstwy z Geoportalu w edytorze Waze. Wyświetlane warstwy to: ortofotomapa ("podkład satelitarny"), numery domów i nazwy miejscowości. Wersja 1.5.8 (2026-10-15) korzysta z oficjalnego WME SDK (v2.374, tryb asynchroniczny) do inicjalizacji, odczytu stanu edytora i obsługi zdarzeń. Zachowuje dotychczasowy wygląd i położenie kontrolek w menu Warstwy.
 
 Skrypt jest zbudowany na podstawie skryptu [geoportal.gov.pl layers for WME without translating PROXY](https://greasyfork.org/en/scripts/10611-geoportal-gov-pl-layers-for-wme-without-translating-proxy) autorstwa [Pawła Pyrczaka](https://greasyfork.org/en/users/9996-pawe%C5%82-pyrczak) oraz poprawek Stracha https://github.com/strah/WME-geoportal.pl oraz Kamila Maruda https://github.com/kmarud/WME-geoportal.pl
 
@@ -32,8 +32,8 @@ Do wyświetlania WMS potrzebne są nadal OpenLayers i `W.map.addLayer` (SDK obs�
 3. Sprawdź suwaki, checkboxy i zachowanie ustawień po przeładowaniu WME.
 4. Jeśli panel się nie pojawia, sprawdź komunikaty `[Geoportal]` w konsoli przeglądarki.
 
-## Changelog [1.5.7] - 2026-10-15
-* **Ortofoto high res: większe kafelki (512 px)**: ortofoto standardowa jest teraz szybsza od high res, bo korzysta z usługi kafelkowej Geoportalu (gotowe kafelki 256 px z pamięci podręcznej), a high res nie ma czegoś takiego — jego jedyne siatki kafelkowe to EPSG:2180 i EPSG:4326 (512 px, do poziomu 16), więc każdy kafelek tej warstwy renderuje serwer na żądanie, po jednym żądaniu na kafelek. Warstwa prosi więc teraz o kafelki 512 px tej samej siatki edytora zamiast 256 px: jedno żądanie pokrywa cztery komórki mapy, czyli ok. 4× mniej renderów na widok (przy widoku 1400×900 ok. 12 zamiast ok. 35), a wyrównanie do siatki mapy i zasada „odrzucony kafelek to dziura, nie pusty widok" zostają bez zmian. Większe kafelki poza tym lepiej wykorzystują pamięć podręczną przeglądarki przy przesuwaniu mapy.
+## Changelog [1.5.8] - 2026-10-15
+* **Ortofoto high res: powrót do kafelków 256 px**: 1.5.7 zwiększyło kafelek tej warstwy do 512 px, żeby ograniczyć liczbę żądań do usługi renderującej. W praktyce wyszło wolniej — żądanie jest wtedy 4× większym renderem, a przeglądarka pobiera z jednego hosta tylko kilka żądań naraz, więc widok zapełnia się później niż przy większej liczbie mniejszych kafli. Warstwa wraca do 256 px (dla widoku 1400×900 ok. 35 mniejszych żądań zamiast ok. 12 dużych), z wyrównaniem do siatki mapy i dziurą wielkości komórki mapy bez zmian. Wersja 1.5.7 nie została wydana osobno — zmieniała tylko ten rozmiar kafelka.
 * **Ortofoto standardowa bez zmian**: zostaje na kafelkach usługi kafelkowej (256 px, poziomy 0–19, rozciąganie powyżej 19).
 
 ## Changelog [1.5.6] - 2026-10-15

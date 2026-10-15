@@ -46,7 +46,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = "1.5.7";
+  const SCRIPT_VERSION = "1.5.8";
   // WME SDK typings this version was checked against (wme-sdk-typings.tgz).
   const SDK_BASELINE = "v2.374-5-g0024d1fa65";
   const WAIT_TIMEOUT = 120000;
@@ -60,13 +60,6 @@
   const ORTO_TILE_MAX_ZOOM = 19;
   // Resolution of a 256 px Web Mercator tile at level 0 (the whole world).
   const MERCATOR_WORLD_RESOLUTION = 156543.03392804097;
-  // The high-res ortho has no tile service of its own to draw from (its only
-  // matrix sets are EPSG:2180 and EPSG:4326, 512 px, level 16 at most), so its
-  // tiles are cut on the client and every one of them is a WMS render. A tile of
-  // 512 px keeps that number down to a quarter of what 256 px tiles cost, while
-  // staying a multiple of the editor's own 256 px cells, and a refused one is
-  // still a hole of 512 px rather than the whole view.
-  const HIGH_RES_TILE_SIZE = 512;
   // The script cannot work without these SDK methods; everything else is optional.
   const REQUIRED_SDK_METHODS = {
     State: ['isReady'],
@@ -320,7 +313,6 @@
       const adapter = this;
       const minZoom = options.minZ ?? 0;
       const singleTile = options.singleTile ?? true;
-      const tileSize = options.tileSize ?? 0;
       // State of this layer's image recovery, shared with retryMissingImage.
       const recovery = { tried: 0, timer: null, stamp: null, holding: false };
       // The photo layers are opaque mosaics: transparency is a contradiction there
@@ -333,10 +325,6 @@
         {
           isBaseLayer: false, visibility: false,
           singleTile,
-          // Bigger tiles of the same grid: OpenLayers steps its grid by this size
-          // and asks for one image of that many pixels per step, so a 512 px tile
-          // covers four of the map's own cells with one request.
-          ...(tileSize ? { tileSize: new this.OL.Size(tileSize, tileSize) } : {}),
           transitionEffect: "resize",
           noMagic: true, // never let OpenLayers rewrite the format
           getURL: function (bounds) {
@@ -809,12 +797,9 @@
       // standard ortho straight from the Geoportal tile service (the same z/x/y
       // tiles the map draws, levels 0-19), the high-res ortho cut into that grid
       // on the client, because its service publishes no such tiles. A refused tile
-      // is one hole in the view, with the editor's base map behind it. The
-      // high-res service renders each tile on demand - there is no tile cache
-      // behind it - so that layer asks for tiles of HIGH_RES_TILE_SIZE px: a
-      // quarter of the requests of 256 px tiles for the same view.
+      // is one hole in the view, with the editor's base map behind it.
       this.createTileLayer("Geoportal - ortofoto", this.TILE_SERVICES.orto, { maxZ: ORTO_TILE_MAX_ZOOM });
-      this.createWMSLayer("Geoportal - ortofoto high res", this.WMS_SERVICES.orto_high, "Raster", "image/jpeg", { singleTile: false, tileSize: HIGH_RES_TILE_SIZE, minZ: 14 });
+      this.createWMSLayer("Geoportal - ortofoto high res", this.WMS_SERVICES.orto_high, "Raster", "image/jpeg", { singleTile: false, minZ: 14 });
 
       if (usrRank >= 1) {
         this.createWMSLayer("Geoportal - OSM", this.WMS_SERVICES.osm, "osm", "image/png");
