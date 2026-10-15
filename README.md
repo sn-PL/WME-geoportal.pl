@@ -19,10 +19,12 @@ Na podstawie skryptu [geoportal.gov.pl layers for WME without translating PROXY]
 
 ## Changelog [1.6.0] - 2026-10-15
 
-* **BDOT i przejazdy w układzie 1992**: kompozycja BDOT10k rysuje dane tylko w tym układzie — pytana w 4326 zwracała dla każdego miejsca kraju ten sam obrazek błędu, który zakrywał mapę („szare pola”).
+* **BDOT i przejazdy w układzie 1992**: te usługi rysują dane tylko w tym układzie — pytane w 4326 zwracały obrazek własnego błędu, który zakrywał mapę („szare pola”, „Invalid CRS given (EPSG:4326).”).
+* **„Topografia / Inne” bez suwaków i czytelniejsze**: drogi, przejazdy i obiekty topograficzne mają sam checkbox, a cienkie ciemne linie i teksty dostają białą obwódkę i podbitą jasność, więc widać je na ciemnym podkładzie.
 * **Suwaki BDOT usunięte**: każda warstwa BDOT jest tylko włączana checkboxem i rysuje się w pełnej nieprzezroczystości.
 * **OSM, ortofoto, przejazdy i obiekty topograficzne na kafelkach**: nieudany kafelek to jedna dziura, przez którą widać podkład WME, a nie pusta warstwa albo obraz błędu na cały widok.
 * **Bez zmian**: pozostałe warstwy, kategorie, checkboxy, suwaki i zapisane ustawienia.
+* **Ostrzeżenie**: usługi obiektów topograficznych i przejazdów mają dane tylko dla części kraju i tylko od pewnego przybliżenia.
 
 ## Changelog [1.5.8] - 2026-10-15
 
