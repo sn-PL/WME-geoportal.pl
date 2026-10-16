@@ -156,10 +156,10 @@ module.exports = async function requests(report) {
   // are the information: those ask for half of them, because the one way to get a
   // service letter bigger is to have it drawn in an image of half the pixels and
   // stretched over the place (the filter of the layer then sharpens it) - and those
-  // same layers are drawn in cells of the map twice the editor's own (round 25):
-  // one service rendering covers four times the ground, so a view is made of a
-  // quarter of the images, every one of which the service puts its own copy of
-  // every name into.
+  // same layers are drawn in cells of the map of their own size - twice the editor's
+  // (1024 px) or eight times it (2048 px, the two layers whose every parcel or obręb
+  // carries a number) - so a view is made of a fraction of the images, every one of
+  // which the service puts its own copy of every name into.
   for (const name of LAYER_ORDER.filter(name => LAYERS[name].kind === 'grid')) {
     const requests = env.requestsOf(env.layer(name));
     const sizes = [...new Set(requests.map(url => `${params(url).WIDTH}x${params(url).HEIGHT}`))];
@@ -188,7 +188,7 @@ module.exports = async function requests(report) {
     const cell = image ? parseFloat(image.style.width) : 0;
     const images = layer.grid.reduce((sum, row) => sum + row.filter(Boolean).length, 0);
     report.check(`“${name}” draws an 800x600 view out of far fewer images than the editor's own cells`,
-      cell === LAYERS[name].cell && images <= cellsOver(cell) && images * 2 <= cellsOver(256),
+      cell === LAYERS[name].cell && images <= cellsOver(cell) && images * 4 <= cellsOver(256),
       `${images} images of ${cell} px (asked for ${asked.WIDTH}x${asked.HEIGHT}), against ` +
       `${cellsOver(256)} images of 256 px, ${cellsOver(cell)} if all of them covered the view`);
   }

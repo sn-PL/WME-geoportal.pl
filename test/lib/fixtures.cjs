@@ -66,9 +66,13 @@ const BDOT_LAYERS = {
 /**
  * Every layer the script builds, in the order it defines them, with the properties
  * the suites check. `magnify: 2` means the letters are asked for in an image of
- * half the pixels; `cell: 1024` means such a layer is drawn in cells of 1024 px of
- * the map (the editor's own grid is 256 px), so a view is made of far fewer
- * images - each of which a service draws its own copy of every name into. `kind: 'tiles'` is a WMTS/XYZ layer of the editor's own grid,
+ * half the pixels; `cell` means such a layer is drawn in cells of that many pixels
+ * of the map (the editor's own grid is 256 px), so a view is made of far fewer
+ * images - each of which a service draws its own copy of every name into. The two
+ * layers whose every parcel or obręb carries a number (`podział adm`, `Miasta`) draw
+ * the widest cells (2048 px): in a window of the editor's size they are one or two
+ * images, so a number has almost no second image to be drawn into and to meet itself
+ * at the edge of. `kind: 'tiles'` is a WMTS/XYZ layer of the editor's own grid,
  * `kind: 'view'` a WMS layer fetchting one image per view, `kind: 'grid'` a WMS
  * layer fetchting one image per cell.
  * @type {Record<string, object>}
@@ -122,13 +126,13 @@ const LAYERS = {
   'Geoportal - podział adm': {
     kind: 'grid', service: SERVICES.parcels, category: 'Podział Administracyjny',
     layers: 'dzialki,numery_dzialek', format: 'image/png', minZ: 15, singleTile: false,
-    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, magnify: 2, cell: 1024, contrast: 'white'
+    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, magnify: 2, cell: 2048, contrast: 'white'
   },
   'Geoportal - Miasta': {
     kind: 'grid', service: SERVICES.border, category: 'Podział Administracyjny',
     layers: 'A06_Granice_obrebow_ewidencyjnych,A05_Granice_jednostek_ewidencyjnych,A04_Granice_miast',
     format: 'image/png', minZ: 12, singleTile: false, ratio: 1.5, crs: 'EPSG:4326',
-    hasOpacity: false, magnify: 2, cell: 1024, contrast: 'outline'
+    hasOpacity: false, magnify: 2, cell: 2048, contrast: 'outline'
   },
   'Geoportal - gminy': {
     kind: 'grid', service: SERVICES.border, category: 'Podział Administracyjny',

@@ -103,7 +103,7 @@ for (const name of SHOW) {
   // report. For the layers whose ink is left alone (the boundaries, the roads, the
   // BDOT surfaces) nothing changed in this round, and the column says so.
   const previous = kind === 'white'
-    ? { css: 'brightness(0) invert(1) url(#geoportal-previous)', caption: 'poprzednio &mdash; pr&#243;g bez wyg&#322;adzania (schodki)' }
+    ? { css: 'brightness(0) invert(1) url(#geoportal-previous)', caption: 'poprzednio &mdash; s&#322;absze wyg&#322;adzanie (0,8 px)' }
     : { css: filters[kind] || 'none', caption: kind === 'outline'
         ? 'bez zmian od rundy 24 &mdash; rysunek us&#322;ugi + obw&oacute;dka'
         : 'bez zmian od rundy 20 &mdash; rozja&#347;nienie i bia&#322;a kraw&#281;d&#378;' };
@@ -165,8 +165,8 @@ const html = `<!doctype html>
 ${svg}
 <svg id="geoportal-previous-filter" width="0" height="0" style="position:absolute;left:0;top:0;pointer-events:none">
   <defs><filter id="geoportal-previous" x="-20%" y="-20%" width="140%" height="140%"
-    color-interpolation-filters="sRGB"><feComponentTransfer result="ink"><feFuncA type="linear" slope="4"
-    intercept="-1.1"/></feComponentTransfer><feMorphology in="ink" operator="dilate" radius="1"
+    color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="0.8" result="soft"/><feComponentTransfer in="soft" result="ink"><feFuncA type="linear" slope="20"
+    intercept="-8.5"/></feComponentTransfer><feMorphology in="ink" operator="dilate" radius="1"
     result="grown"/><feFlood flood-color="#000" result="black"/><feComposite in="black" in2="grown"
     operator="in" result="casing"/><feMerge><feMergeNode in="casing"/><feMergeNode in="ink"/></feMerge></filter></defs>
 </svg>
@@ -192,9 +192,11 @@ ${svg}
     Od rundy 25 kom&oacute;rka tych warstw ma 1024 px, a obraz 512 px (by&#322;o 256/128) &mdash;
     liter to nie zmienia, a okno mapy sk&#322;ada si&#281; z kilku obrazk&oacute;w zamiast
     kilkudziesi&#281;ciu, wi&#281;c us&#322;uga rysuje mniej kopii tych samych podpis&oacute;w.
-    Runda 26 dodaje przed progiem rozmycie 0,8 px: kontur litery przestaje by&#263;
-    schodkowy, a cienkie linie rysunku zostaj&#261; (ich &347;rodek po rozmyciu nadal
-    przekracza pr&oacute;g).</div>
+    Runda 26 dodaje przed progiem rozmycie 0,8 px, a runda 27 zwi&#281;ksza je do
+    1,2 px i skraca zbocze progu (nachylenie 8): kontur litery przestaje by&#263;
+    schodkowy, a kraw&#281;d&#378; kreski jest delikatnie zmi&#281;kczona. Cienkie linie
+    rysunku zostaj&#261; &#8212; ich &347;rodek po rozmyciu nadal przekracza pr&oacute;g.
+    Kolumna &bdquo;poprzednio&rdquo; pokazuje &#322;a&#324;cuch z rundy 26.</div>
 </fieldset>
 ${rows.map(row => `<div class="row">
   <h2>${row.name}<small>${row.kind ? `filtr: ${row.kind}` : 'bez filtra'} &middot; ${row.detail}</small></h2>

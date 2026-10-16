@@ -101,9 +101,9 @@ module.exports = async function layers(report) {
     (() => {
       const transfer = ink && ink.querySelector('feFuncA');
       return transfer && transfer.getAttribute('type') === 'linear' &&
-        Number(transfer.getAttribute('slope')) >= 10;
+        Number(transfer.getAttribute('slope')) >= 5;
     })(),
-    'alpha * slope + intercept with a steep slope, i.e. every pixel is ink or it is not');
+    'alpha * slope + intercept with a slope of at least 5, i.e. the edge is short');
   // Round 26: the threshold alone left the staircases of the doubled raster in the
   // letter's contour (every edge of the service's pixel is two screen pixels of step).
   // A small blur in front of the threshold turns those steps into ramps, and the
@@ -116,9 +116,9 @@ module.exports = async function layers(report) {
       const sigma = Number(blurs[0].getAttribute('stdDeviation'));
       const first = ink.firstElementChild;
       const order = first === blurs[0] && blurs[0].nextElementSibling?.tagName === 'feComponentTransfer';
-      return Number.isFinite(sigma) && sigma > 0.4 && sigma <= 1 && order;
+      return Number.isFinite(sigma) && sigma > 1 && sigma <= 1.6 && order;
     })(),
-    'one feGaussianBlur of 0.4-1 px in front of the transfer: the step of one raster pixel becomes a ramp');
+    'one feGaussianBlur of 1-1.6 px in front of the transfer: the step of one raster pixel becomes a ramp');
   report.check('the letters carry a one-pixel casing grown from their own shape',
     !!ink && ink.querySelector('feMorphology')?.getAttribute('operator') === 'dilate' &&
     ink.querySelector('feMorphology')?.getAttribute('radius') === '1' &&
