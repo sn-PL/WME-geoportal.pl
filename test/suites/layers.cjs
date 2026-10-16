@@ -46,7 +46,6 @@ module.exports = async function layers(report) {
     if ((options.minZ ?? 0) !== expected.minZ) problems.push(`minZ=${options.minZ}`);
     if ((options.hasOpacity !== false) !== expected.hasOpacity) problems.push(`hasOpacity=${options.hasOpacity}`);
     if ((options.contrast ?? false) !== expected.contrast) problems.push(`contrast=${options.contrast}`);
-    if ((options.magnify ?? 1) !== expected.magnify) problems.push(`magnify=${options.magnify}`);
     if (!layer) problems.push('no layer instance');
     report.check(`“${name}” is what the list says it is`, problems.length === 0, problems.join(', '));
   }
@@ -80,59 +79,54 @@ module.exports = async function layers(report) {
       return filter === env.internals.CONTRAST_FILTER[LAYERS[name].contrast];
     }),
     Object.entries(env.internals.CONTRAST_FILTER).map(([kind, value]) => `${kind}: ${value}`).join(' | '));
-  report.check('both filters put a white halo under the drawing and lift the ink',
+  // The halo the reports show is the filter's own doing: three stacked shadows
+  // blur the strokes they are meant to lift, and where a drawing runs thick the
+  // blurred edges of the neighbours add up into what a reader takes for a second,
+  // fainter copy. Every letter has to keep the shape the service drew for it, so
+  // the casing is a hairline and there is nothing else on top of the ink.
+  report.check('both filters case the drawing in a hairline of white and lift the ink',
     Object.values(env.internals.CONTRAST_FILTER).every(filter =>
-      (filter.match(/#fff/g) || []).length === 3 &&
-      Number(filter.match(/brightness\((\d+(?:\.\d+)?)\)/)[1]) >= 2),
-    'three white halos (0.8, 1.6 and 2.6 px) plus a brightness lift of 2 or more');
+      (filter.match(/drop-shadow\(/g) || []).length === 2 &&
+      (filter.match(/drop-shadow\(0 0 1px #fff\)/g) || []).length === 2 &&
+      Number(filter.match(/brightness\((\d+(?:\.\d+)?)\)/)[1]) >= 1.9) &&
+    Object.values(env.internals.CONTRAST_FILTER).every(filter => !/\d\.\d+px|contrast\(/.test(filter)),
+    'two one-pixel white edges per layer and a brightness lift, no wider glow');
   report.check('the faint colours of the boundaries are raised as well, the black strokes are not',
     /saturate\(\d/.test(env.internals.CONTRAST_FILTER.colour) &&
     !/saturate/.test(env.internals.CONTRAST_FILTER.dark) &&
     env.internals.CONTRAST_FILTER.colour.length > env.internals.CONTRAST_FILTER.dark.length,
     `colour ${env.internals.CONTRAST_FILTER.colour}`);
 
-  // What the filter cannot do is make the drawing bigger: these services size
-  // their labels in screen pixels, so a label is about ten pixels whatever the
-  // zoom. The layers whose text has to be read therefore ask the service for a
-  // drawing of the same area at half the pixels (magnify 2) and let the browser
-  // stretch it over the same place - twice the size, half the detail, the only
-  // lever there is without the service offering a style of its own.
-  const magnified = names.filter(name => registry[name].definition.options.magnify === 2);
-  const expectedMagnified = Object.entries(LAYERS).filter(([, e]) => e.magnify === 2).map(([name]) => name);
-  report.check('exactly the layers with small text ask for a magnified drawing',
-    magnified.length === expectedMagnified.length && expectedMagnified.every(name => magnified.includes(name)),
-    `${magnified.length} layers: ${magnified.map(name => name.replace('Geoportal - ', '')).join(', ')}`);
-  report.check('every layer of the boundary and parcel categories is magnified',
-    ['Geoportal - podział adm', 'Geoportal - Miasta', 'Geoportal - gminy', 'Geoportal - powiaty',
-      'Geoportal - województwa', 'Geoportal - Granica PL', 'Geoportal - obiekty topograficzne',
-      'Geoportal - przejazdy kolejowe (wymagany duży zoom)']
-      .every(name => magnified.includes(name)),
-    'parcels, towns, communes, counties, provinces, state border, topographic objects, level crossings');
-  // A label the service draws is placed inside the picture it is asked for. Asked
-  // for a cell at a time, a name or a number that reaches over a cell's edge came
-  // out once per cell - which is the old geometry and the doubled parcel numbers
-  // the reports show. These layers therefore ask for the view in one picture, where
-  // each label is placed once, and the cells are left to the services that refuse a
-  // whole-window picture (the crossings, the topographic objects and the photos).
+  // A layer asked for fewer pixels than it is drawn with shows soft, blocky
+  // letters, whatever the filter then does to them, and the services draw their
+  // labels at a size fixed in pixels - so no layer asks for a magnified drawing
+  // any more (it is the one lever that makes the text bigger, and it costs the
+  // text its edges).
+  const magnified = names.filter(name => registry[name].definition.options.magnify !== undefined);
+  report.check('no layer asks a service for a magnified drawing any more',
+    magnified.length === 0,
+    magnified.length ? magnified.map(name => name.replace('Geoportal - ', '')).join(', ') : 'every drawing is asked for at the size it is drawn');
+
+  // The parcels and the boundaries are cells of the editor's grid: the map asks
+  // for what it is looking at and keeps what it has, so a pan asks for the strip
+  // it uncovers instead of a whole view from the service. What stood on the map
+  // twice was never the cells - it was the image of the previous view that
+  // OpenLayers keeps beside the new one (dropped in getURL, see recovery).
   const labelLayers = ['Geoportal - podział adm', 'Geoportal - Miasta', 'Geoportal - gminy',
     'Geoportal - powiaty', 'Geoportal - województwa', 'Geoportal - Granica PL'];
-  report.check('the layers whose labels come out doubled in cells ask for one image of the view',
-    labelLayers.every(name => env.layer(name).singleTile === true && env.layer(name).ratio === 1),
+  report.check('the label and boundary layers are cells of the editor\'s grid, not images of the view',
+    labelLayers.every(name => env.layer(name).singleTile === false && env.layer(name).ratio === 1.5),
     labelLayers.map(name => `${name.replace('Geoportal - ', '')}: singleTile=${env.layer(name).singleTile}, ratio=${env.layer(name).ratio}`).join(', '));
   report.check('the services that refuse a whole-window picture keep drawing in cells',
     ['Geoportal - przejazdy kolejowe (wymagany duży zoom)', 'Geoportal - obiekty topograficzne',
       'Geoportal - ortofoto high res', 'Geoportal - adresy']
       .every(name => env.layer(name).singleTile === false),
     'crossings, topographic objects, the high-res photo and the addresses');
-  report.check('the photo layers and the thick road layer are left as they are',
-    ['Geoportal - ortofoto', 'Geoportal - ortofoto high res', 'Geoportal - OSM', 'Geoportal - drogi']
-      .every(name => !magnified.includes(name)),
-    'photos and roads at their own size');
   const weakest = Math.min(...filtered.map(name => {
     const filter = registry[name].instance.div.style.filter;
     return Number((filter.match(/brightness\((\d+(?:\.\d+)?)\)/) || [])[1] || 0);
   }));
-  report.check('no filtered layer is left dimmer than the halo of 1.6.0, and the halo is wider',
+  report.check('no filtered layer is left dimmer than the ink of 1.6.0',
     weakest >= 1.7, `the weakest brightness lift is ${weakest} (1.6.0 used 1.7 with a single 1.5 px halo)`);
 
   // Opacity: a layer without a slider always draws at full opacity, whatever an

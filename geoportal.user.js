@@ -23,7 +23,7 @@
  */
 
 /* Changelog:
- *  1.6.0 - OSM, the standard photo layer, the level crossings and the topographic objects come as tiles of the editor's own map, because those services refuse a whole-window picture; the crossings and the detailed BDOT switches ask in EPSG:2180, the system those services draw in - asked in 4326 they answer with a picture of their own error instead of the data (drawn into the image, because OpenLayers asks a WMS for INIMAGE exceptions); every service is now asked for its errors as documents instead of pictures, so a failure leaves a hole in the layer instead of a grey plate of text on the map; the overlays drawn in thin dark lines ("Topografia / Inne") get a white halo and a lift of brightness instead of an opacity slider, and so do the BDOT switches; the parcels, the towns, the communes, the counties, the provinces and the state border, drawn in faint colours that the photos swallow, are lifted and saturated the same way, so their small labels read over the imagery too, and those layers - the crossings, the topographic objects and the BDOT switches with them - ask the service for the same area in fewer pixels and are drawn stretched over it, because these services size their labels in screen pixels and that is the only way to get them larger than the ten pixels they come in; the parcels and the boundaries are drawn as one image of the view instead of cells of the editor's grid, because the service places every label inside the image it is asked for - asked cell by cell it drew the same parcel number or county name once per cell, side by side; the picture of the previous view that OpenLayers leaves on the map while a new one is drawn is taken off as soon as the new view is complete - over a service that refuses part of its answers it used to stand there much longer, doubling the parcel numbers - and it is not carried through a zoom at all, because OpenLayers stretches it to the new scale and then every label stood on the map twice, once sharp and once washed out at the size of the old zoom; no view picture is asked for past about a megapixel, and a setting that cannot be read no longer stops the script.
+ *  1.6.0 - OSM, the standard photo layer, the level crossings and the topographic objects come as tiles of the editor's own map, because those services refuse a whole-window picture; the parcels and the boundaries are tiles of that map again too, so a pan inside the margin of the tiles asks for nothing at all and a longer one only for the strip it uncovers; the crossings and the detailed BDOT switches ask in EPSG:2180, the system those services draw in - asked in 4326 they answer with a picture of their own error instead of the data (drawn into the image, because OpenLayers asks a WMS for INIMAGE exceptions); every service is now asked for its errors as documents instead of pictures, so a failure leaves a hole in the layer instead of a grey plate of text on the map; the overlays drawn in thin dark lines ("Topografia / Inne") get a white edge and a lift of brightness instead of an opacity slider, and so do the BDOT switches and the parcels, the towns, the communes, the counties, the provinces and the state border, whose faint colours the photos swallow - the edge is a hairline under the letters, not a halo around them, because a halo softens the letters it should lift and gathers into what reads as a second, fainter copy of them; every layer is asked for exactly the pixels the map draws it with, so the letters keep the shape and the size the service gave them and nothing is stretched; the drawing of the view a layer has delivered stays on the map only for as long as that view is the one being asked for - OpenLayers used to keep it beside the new one, at the offset of the pan, which is what doubled the parcel numbers and the names, and it is never carried through a zoom, where OpenLayers stretched it to the new scale; a view picture is never asked for past about a megapixel, a refused image is asked for again after a moment, and a setting that cannot be read no longer stops the script.
  *  1.5.5 - WME SDK v2.374: async SDK mode; version-tolerant startup, events, zoom filtering and controls; photo layers request JPEG without the needless transparency flag, as one image per view instead of a tile grid (the ortho WMS answers whole tile batches with 404); a refused image is requested three times - once immediately, then twice at a growing distance - and a view image that OpenLayers gave up on is requested again instead of leaving the map empty.
  *  1.5.4 - Use SDK readiness, state and events; guard WMS and preserve the Layers menu.
  *  1.5.2 - New layer names address, streets WMS endpoint
@@ -84,23 +84,22 @@
   // border). Over the editor's imagery - and over its photo base map in particular
   // - a dark line has nothing to contrast with and a faint colour is swallowed.
   // A filter on the layer's own element lifts the ink, keeps its colour and puts a
-  // white halo under it, so the same layer reads over any base map; an opacity
+  // white edge under it, so the same layer reads over any base map; an opacity
   // slider cannot do that - a black line can only get dimmer. `dark` is for the
   // drawings made of black strokes, `colour` for the ones drawn in a faint colour,
   // which need the colour raised as well.
+  //
+  // The edge is two pixels wide and nothing else. A wide halo is a picture of the
+  // glyph under a grey haze: it softens the strokes it is meant to lift, and where
+  // the strokes of a drawing run close together the halos add up. What a reader
+  // takes for a second, fainter copy of a letter - the doubled numbers of the
+  // reports - is that haze. Every letter and every line has to keep the shape the
+  // service drew for it, so the ink is lifted and cased, never smeared.
   const CONTRAST_FILTER = {
-    dark: "brightness(2.1) drop-shadow(0 0 0.8px #fff) drop-shadow(0 0 1.6px #fff) drop-shadow(0 0 2.6px #fff)",
-    colour: "brightness(2.4) saturate(1.8) contrast(1.1) " +
-      "drop-shadow(0 0 0.8px #fff) drop-shadow(0 0 1.6px #fff) drop-shadow(0 0 2.6px #fff)"
+    dark: "brightness(2) drop-shadow(0 0 1px #fff) drop-shadow(0 0 1px #fff)",
+    colour: "brightness(2.2) saturate(1.7) " +
+      "drop-shadow(0 0 1px #fff) drop-shadow(0 0 1px #fff)"
   };
-  // How much the drawing is magnified on the screen: the layer asks the service
-  // for an image of the same area with 1/MAGNIFY of the pixels and the browser
-  // stretches it over the same place. The services draw their labels at a size
-  // fixed in pixels - about ten pixels, whatever the zoom - which is what makes
-  // them unreadable over the editor's imagery; this is the only way to get them
-  // larger, short of the service offering a bigger style. Two is twice the size
-  // (and half the detail); one leaves the drawing as it comes.
-  const LABEL_MAGNIFY = 2;
   // Geodetic constants of EPSG:2180 (PUWG 1992): GRS80, transverse Mercator with
   // the scale factor 0.9993, central meridian 19°E and the usual false origin.
   const PUWG = { a: 6378137, f: 1 / 298.257222101, k0: 0.9993, meridian: 19, falseEasting: 500000, falseNorthing: -5300000 };
@@ -444,7 +443,10 @@
       // services behind their integration (see to2180).
       const crs = options.crs ?? "EPSG:4326";
       // State of this layer's image recovery, shared with retryMissingImage.
-      const recovery = { tried: 0, timer: null, stamp: null, holding: false };
+      // `view` is the last area the layer asked for: the image the layer is
+      // showing belongs to that area alone, so an image of any other area has
+      // no business on the map (see getURL).
+      const recovery = { tried: 0, timer: null, stamp: null, view: null };
       // The photo layers are opaque mosaics: transparency is a contradiction there
       // and OpenLayers answered it by switching their JPEG to PNG. Only the PNG
       // overlays ask for it, so the requests stay as they were before 1.5.0.
@@ -479,12 +481,29 @@
             // the view image is missing, every request asks under a fresh address,
             // so no cache can answer it with the refused response.
             const imageSize = adapter.requestImageSize(asked);
-            const magnify = options.magnify ?? 1;
             const request = {
               BBOX: crs === "EPSG:2180" ? bounds2180(bounds) : bounds.toArray(true),
-              WIDTH: Math.max(64, Math.round(imageSize.w / magnify)),
-              HEIGHT: Math.max(64, Math.round(imageSize.h / magnify))
+              // Asked for exactly the pixels that will be drawn, never fewer: an
+              // image asked for at half of its size and stretched over it is what
+              // turns the service's letters into the soft, blocky shapes of the
+              // reports - and the services draw their labels at a size fixed in
+              // pixels, so an image asked for at its own size is also the size the
+              // drawing is meant to have.
+              WIDTH: Math.max(64, Math.round(imageSize.w)),
+              HEIGHT: Math.max(64, Math.round(imageSize.h))
             };
+            // The image the layer is showing belongs to the view it was rendered
+            // for. The moment another view is asked for - a pan, a zoom, a wider
+            // window - that image is no longer the view the reader is looking at,
+            // and it is still on the map: drawn at the offset of the place it was
+            // rendered for, with its own labels standing beside the labels of the
+            // new drawing, which is what the doubled numbers and names of the
+            // reports were. It goes now, at the request, and not when the answer
+            // to that request happens to arrive: a refused image would otherwise
+            // leave the wrong picture on the map for the whole of the retry.
+            const view = request.BBOX.join(",") + "@" + request.WIDTH + "x" + request.HEIGHT;
+            if (recovery.view && recovery.view !== view) this.removeBackBuffer();
+            recovery.view = view;
             if (recovery.stamp) request._ = recovery.stamp;
             return this.getFullRequestString(request);
           },
@@ -492,30 +511,17 @@
             this.params.CRS = crs;
             return adapter.OL.Layer.Grid.prototype.getFullRequestString.apply(this, arguments);
           },
-          // OpenLayers drops its back buffer - the image the layer is showing -
-          // as soon as the replacement counts as loaded, and a refused image
-          // counts as loaded too. In single-tile mode that image is the whole
-          // view, so a refused refresh used to wipe the photo layer off the map
-          // until a retry arrived. Keep the delivered view, and let go of it
-          // only when a replacement really is delivered.
-          removeBackBuffer: function () {
-            if (singleTile && recovery.holding) return;
-            return adapter.OL.Layer.Grid.prototype.removeBackBuffer.apply(this, arguments);
-          },
-          // OpenLayers keeps the picture of the previous view on the map while a
-          // new one is on its way, and rescales it when the scale changes. That
-          // rescaling is what the reports show: after a zoom the old drawing
-          // stands over the new view at the size of the old zoom, so every label
-          // appears twice - once sharp at the new scale and once, washed out and
-          // twice as large, from the old one, and the two never line up. A zoom
-          // is a new drawing, not a bigger copy of the old one: let that picture
-          // go and let the map show what it has - the editor's base map or the
-          // photo layer - until the new cells arrive. A pan keeps it (a pan of
-          // the same view is still the right size, and it covers the map while
-          // the cells are fetched), and so does a refused refresh, as before.
+          // A zoom, and only a zoom, reaches here with a drawing of the old scale:
+          // OpenLayers would rescale the picture of the previous view and lay it
+          // over the new one, where every label of it appears a second time -
+          // washed out, at the size of the old zoom, and never in line with the
+          // new drawing. That is the doubled and blurred text of the reports, on
+          // one of the two paths that produced it (the other one, a pan, is
+          // answered in getURL). A zoom is a new drawing: the old picture goes,
+          // and the map shows what it has - the editor's base map or the photo
+          // layer behind it - until the new cells arrive.
           applyBackBuffer: function (resolution) {
             if (resolution !== this.gridResolution) {
-              recovery.holding = false;
               this.removeBackBuffer();
               return;
             }
@@ -529,7 +535,7 @@
      * Put a built layer on the map and start watching it, and let the first one
      * tell the adapter which map it is on.
      * @param {any} layer layer built by createLayer or createTileLayer
-     * @param {{tried: number, timer: any, stamp: number|null, holding: boolean}} recovery its state
+     * @param {{tried: number, timer: any, stamp: number|null, view: string|null}} recovery its state
      * @param {number} opacity
      * @param {any} options the layer's definition options (only `contrast` is read)
      * @returns {any} the layer
@@ -565,7 +571,10 @@
       const minZoom = options.minZ ?? 0;
       const maxZoom = Math.min(options.maxZ ?? TILE_MAX_ZOOM, TILE_MAX_ZOOM);
       // State of this layer's image recovery, shared with retryMissingImage.
-      const recovery = { tried: 0, timer: null, stamp: null, holding: false };
+      // `view` is the last area the layer asked for: the image the layer is
+      // showing belongs to that area alone, so an image of any other area has
+      // no business on the map (see getURL).
+      const recovery = { tried: 0, timer: null, stamp: null, view: null };
       // The service's levels as resolutions of the standard grid, i.e. the same
       // values as the editor's zoom levels, so its tiles line up with the tiles
       // the map is drawn from and a hole is exactly one tile of that map.
@@ -602,14 +611,13 @@
     /**
      * OpenLayers counts a refused image as loaded and never asks for it again, so
      * a refused tile stays a hole and a refused view image stays an empty layer.
-     * The view image is kept on screen through the refusal (removeBackBuffer in
-     * createLayer) and whatever is missing is asked for again at the delays in
-     * IMAGE_RETRY_DELAYS - through mergeNewParams, because OpenLayers' tile
-     * manager keeps a refused draw in a queue that the layer's params event
-     * flushes, while a plain redraw would leave it there. A new map view and a
-     * delivered image start the attempts over.
+     * Whatever is missing is asked for again at the delays in IMAGE_RETRY_DELAYS -
+     * through mergeNewParams, because OpenLayers' tile manager keeps a refused
+     * draw in a queue that the layer's params event flushes, while a plain redraw
+     * would leave it there. A new map view and a delivered image start the
+     * attempts over.
      * @param {any} layer layer built by createLayer
-     * @param {{tried: number, timer: any, stamp: number|null, holding: boolean}} recovery its state
+     * @param {{tried: number, timer: any, stamp: number|null, view: string|null}} recovery its state
      */
     retryMissingImage(layer, recovery) {
       const restart = () => {
@@ -626,47 +634,35 @@
       this.recoveries.push(restart);
       layer.events.on({
         // A delivered image ends the recovery. OpenLayers reports a refused image
-        // as loaded as well, and marks that one; only the others count. It is also
-        // what ends the hold on the image the layer is showing. A layer of tiles
-        // starts over only once no tile of the current grid is missing: a tile
-        // that is still refused has to keep its pending retry, or a neighbour
+        // as loaded as well, and marks that one; only the others count. A layer of
+        // tiles starts over only once no tile of the current grid is missing: a
+        // tile that is still refused has to keep its pending retry, or a neighbour
         // arriving a moment later would cancel the only request that can fill it.
         tileloaded: event => {
           if (event?.tile?.imgDiv?.classList?.contains('olImageLoadError')) return;
           const missing = layer.grid?.some(row => row.some(tile =>
             tile.imgDiv?.classList?.contains('olImageLoadError')));
           if (!missing) {
-            recovery.holding = false;
             restart();
-            // OpenLayers keeps the previous view's tiles - its "back buffer" - on
-            // the map while the new ones are on their way, and only lets it go
-            // 2.5 s after the last of them arrived. Where a service refuses part of
-            // its answers, which is what these do, the new grid can stay incomplete
-            // for much longer than that, and meanwhile the previous view is still
-            // drawn under the new one - the same labels, at the offset of the view
-            // they were rendered for, which is the doubled and faint numbers seen
-            // in the reports. The grid is complete right here, so nothing is
-            // waiting for that picture any more: drop it now instead of later.
-            if (!layer.singleTile && layer.backBuffer && !layer.numLoadingTiles) layer.removeBackBuffer();
+            // OpenLayers keeps the previous drawing - its "back buffer" - on the
+            // map while the new one is on its way, and lets go of it only 2.5 s
+            // after the last tile of the new one arrived. Where a service refuses
+            // part of its answers, which is what these do, the new drawing can stay
+            // incomplete far longer than that, and meanwhile the previous one is
+            // still drawn under it: the labels of the view it was rendered for at
+            // that view's offset. The replacement is here, so nothing is waiting
+            // for it - and for a layer of one image per view, which is where the
+            // doubled names were seen, the replacement is the whole of that layer.
+            if (layer.backBuffer && !layer.numLoadingTiles) layer.removeBackBuffer();
           }
         },
         tileerror: () => {
-          // The refused refresh must not take the delivered view with it; that is
-          // what removeBackBuffer in createLayer holds back until a replacement is
-          // delivered.
-          recovery.holding = true;
+          // A refused image is marked as failed by OpenLayers and hidden by the
+          // stylesheet, so the layer is a hole where it was refused; the retry
+          // below asks for it again under a fresh address.
           recovery.stamp = Date.now();
           if (recovery.timer || recovery.tried >= IMAGE_RETRY_DELAYS.length) return;
           recovery.timer = setTimeout(recover, IMAGE_RETRY_DELAYS[recovery.tried++]);
-        },
-        // A hidden layer cannot show the image kept for it, and after a zoom that
-        // image sits outside the layer's own div, where hiding the layer would
-        // leave the old picture on the map.
-        visibilitychanged: () => {
-          if (layer.visibility || !layer.backBuffer) return;
-          if (layer.backBuffer.parentNode === layer.div) return;
-          recovery.holding = false;
-          this.OL.Layer.Grid.prototype.removeBackBuffer.call(layer);
         }
       });
     }
@@ -1010,28 +1006,29 @@
       // out empty on a normal screen. As tiles of the editor's grid every request
       // is one small cell and each of them is a hole at worst. It draws in
       // EPSG:4326, which is what the map itself speaks (see the note above it).
-      this.createWMSLayer("Geoportal - przejazdy kolejowe (wymagany duży zoom)", this.WMS_SERVICES.rail, "PMT_Linie_Kolejowe_Sp__z_o_o_,Kopalnia_Piasku_KOTLARNIA_-_Linie_Kolejowe_Sp__z__o_o_,Jastrzębska_Spółka_Kolejowa_Sp__z_o_o_,Infra_SILESIA_S_A_,EUROTERMINAL_Sławków_Sp__z_o_o_,Dolnośląska_Służba_Dróg_i_Kolei_we_Wrocławiu,CARGOTOR_Sp__z_o_o_,PKP_SKM_w_Trójmieście_Sp__z_o_o_,PKP_Linia_Hutnicza_Szerokotorowa_Sp__z_o__o_,PKP_Polskie_Linie_Kolejowe", "image/png", { singleTile: false, minZ: 15, crs: "EPSG:2180", hasOpacity: false, magnify: LABEL_MAGNIFY, contrast: "dark" });
+      this.createWMSLayer("Geoportal - przejazdy kolejowe (wymagany duży zoom)", this.WMS_SERVICES.rail, "PMT_Linie_Kolejowe_Sp__z_o_o_,Kopalnia_Piasku_KOTLARNIA_-_Linie_Kolejowe_Sp__z__o_o_,Jastrzębska_Spółka_Kolejowa_Sp__z_o_o_,Infra_SILESIA_S_A_,EUROTERMINAL_Sławków_Sp__z_o_o_,Dolnośląska_Służba_Dróg_i_Kolei_we_Wrocławiu,CARGOTOR_Sp__z_o_o_,PKP_SKM_w_Trójmieście_Sp__z_o_o_,PKP_Linia_Hutnicza_Szerokotorowa_Sp__z_o__o_,PKP_Polskie_Linie_Kolejowe", "image/png", { singleTile: false, minZ: 15, crs: "EPSG:2180", hasOpacity: false, contrast: "dark" });
       this.createWMSLayer("Geoportal - drogi", this.WMS_SERVICES.mileage, "planowane,wbudowie,pikietaz,drugorzedne,glowne,ekspresowe,autostrady", "image/png", { minZ: 12, hasOpacity: false, contrast: "dark" });
-      // The parcels and the boundaries come as one image of the view. As cells of
-      // the editor's grid every label of the service was drawn once per cell, so a
-      // number or a name that reaches over a cell's edge stood on the map twice,
-      // tens of metres apart and at the size the service draws labels in - which
-      // is what the doubled parcel numbers in the reports were. One image of the
-      // view draws each label once. (The crossings and the topographic objects
-      // stay cells: those services refuse a whole-window picture.)
-      this.createWMSLayer("Geoportal - podział adm", this.WMS_SERVICES.parcels, "dzialki,numery_dzialek", "image/png", { ratio: 1, minZ: 15, hasOpacity: false, magnify: LABEL_MAGNIFY, contrast: "colour" });
+      // The parcels and the boundaries are cells of the editor's grid, like the
+      // standard ortho: the map asks for the cell it is looking at, keeps the ones
+      // it already has and asks for the strip a pan uncovers, instead of asking a
+      // service to render the whole window again for every move. Each cell is
+      // asked for at the size it is drawn at, so the letters come from the service
+      // as they were rasterised and no resampling softens them. What stood on the
+      // map twice were not the cells: it was the image of the previous view that
+      // OpenLayers keeps beside the new one, which is dropped in getURL now.
+      this.createWMSLayer("Geoportal - podział adm", this.WMS_SERVICES.parcels, "dzialki,numery_dzialek", "image/png", { singleTile: false, minZ: 15, hasOpacity: false, contrast: "colour" });
 
-      this.createWMSLayer("Geoportal - Miasta", this.WMS_SERVICES.border_city, "A06_Granice_obrebow_ewidencyjnych,A05_Granice_jednostek_ewidencyjnych,A04_Granice_miast", "image/png", { ratio: 1, minZ: 12, hasOpacity: false, magnify: LABEL_MAGNIFY, contrast: "colour" });
-      this.createWMSLayer("Geoportal - gminy", this.WMS_SERVICES.border_city, "A03_Granice_gmin", "image/png", { ratio: 1, minZ: 10, hasOpacity: false, magnify: LABEL_MAGNIFY, contrast: "colour" });
-      this.createWMSLayer("Geoportal - powiaty", this.WMS_SERVICES.border_city, "A02_Granice_powiatow", "image/png", { ratio: 1, minZ: 10, hasOpacity: false, magnify: LABEL_MAGNIFY, contrast: "colour" });
-      this.createWMSLayer("Geoportal - województwa", this.WMS_SERVICES.border_city, "A01_Granice_wojewodztw", "image/png", { ratio: 1, minZ: 8, hasOpacity: false, magnify: LABEL_MAGNIFY, contrast: "colour" });
-      this.createWMSLayer("Geoportal - Granica PL", this.WMS_SERVICES.border_city, "A00_Granice_panstwa", "image/png", { ratio: 1, minZ: 0, hasOpacity: false, magnify: LABEL_MAGNIFY, contrast: "colour" });
+      this.createWMSLayer("Geoportal - Miasta", this.WMS_SERVICES.border_city, "A06_Granice_obrebow_ewidencyjnych,A05_Granice_jednostek_ewidencyjnych,A04_Granice_miast", "image/png", { singleTile: false, minZ: 12, hasOpacity: false, contrast: "colour" });
+      this.createWMSLayer("Geoportal - gminy", this.WMS_SERVICES.border_city, "A03_Granice_gmin", "image/png", { singleTile: false, minZ: 10, hasOpacity: false, contrast: "colour" });
+      this.createWMSLayer("Geoportal - powiaty", this.WMS_SERVICES.border_city, "A02_Granice_powiatow", "image/png", { singleTile: false, minZ: 10, hasOpacity: false, contrast: "colour" });
+      this.createWMSLayer("Geoportal - województwa", this.WMS_SERVICES.border_city, "A01_Granice_wojewodztw", "image/png", { singleTile: false, minZ: 8, hasOpacity: false, contrast: "colour" });
+      this.createWMSLayer("Geoportal - Granica PL", this.WMS_SERVICES.border_city, "A00_Granice_panstwa", "image/png", { singleTile: false, minZ: 0, hasOpacity: false, contrast: "colour" });
 
       // Topographic objects of the counties that published them. The integration
       // behind this address hands every request to the WMS of the county it
       // covers, and those answer in EPSG:2180 only - in 4326 the whole country
       // comes back as an empty image, which is what the layer showed.
-      this.createWMSLayer("Geoportal - obiekty topograficzne", this.WMS_SERVICES.topo, "bdot", "image/png", { singleTile: false, minZ: 16, crs: "EPSG:2180", hasOpacity: false, magnify: LABEL_MAGNIFY, contrast: "dark" });
+      this.createWMSLayer("Geoportal - obiekty topograficzne", this.WMS_SERVICES.topo, "bdot", "image/png", { singleTile: false, minZ: 16, crs: "EPSG:2180", hasOpacity: false, contrast: "dark" });
 
       // The composition draws these classes from about 1:10 000 up, and it draws
       // them in the national system EPSG:2180: asked in 4326 it answers one and
@@ -1040,7 +1037,7 @@
       // switch asks for one image of the view itself (ratio 1) instead of
       // OpenLayers' larger default, and none of them has an opacity slider.
       Object.entries(BDOT_LAYERS).forEach(([name, classNames]) => {
-        this.createWMSLayer(name, this.WMS_SERVICES.kompozycja, classNames, "image/png", { minZ: 16, ratio: 1, crs: "EPSG:2180", hasOpacity: false, magnify: LABEL_MAGNIFY, contrast: "colour" });
+        this.createWMSLayer(name, this.WMS_SERVICES.kompozycja, classNames, "image/png", { minZ: 16, ratio: 1, crs: "EPSG:2180", hasOpacity: false, contrast: "colour" });
       });
     }
 

@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 /**
- * Write a page that shows the real Geoportal drawings twice - as the service sends
- * them and with the filter the script puts on the layer - so the readability of the
- * thin-stroke layers can be judged (and the numbers tuned) in a browser instead of
- * on the map.
+ * Write a page that shows the real Geoportal drawings three times: as the service
+ * draws them at the size the script asks for now, as the previous version showed
+ * them (the same area asked for at half the pixels and stretched back over it, under
+ * the wide white halo of 1.6.0) and as the script shows them now (the drawing at its
+ * own size, under the hairline edge) - so the two treatments can be judged side by
+ * side in a browser instead of on the map, and the numbers of the new one tuned.
  *
  *   node test/tools/filter-preview.mjs            # writes test/.cache/filter-preview.html
  *   node test/tools/filter-preview.mjs --serve    # ...and serves test/.cache on :8012
@@ -100,26 +102,31 @@ for (const name of SHOW) {
   }
   if (!url) continue;
   const query = params(url);
-  // The script may already ask for a magnified drawing (a layer with text to
-  // read). The page shows three columns: the drawing at its own size (what the
-  // service would send without the magnification), the request the script makes
-  // now, and that request magnified by the slider. `wide` is the address at the
-  // service's own size, which is what the slider divides.
-  const base = LAYERS[name].magnify ?? 1;
-  const wide = base === 1 ? url : withSize(url, Number(query.WIDTH) * base, Number(query.HEIGHT) * base);
+  // The address of the same area with half the pixels: that is what 1.6.0 asked for
+  // on the layers whose text it wanted bigger, and what the browser then stretched
+  // over the same place. The service draws its labels at a size fixed in pixels, so
+  // halving the pixels doubles them - at the cost of the edges of every letter.
+  const half = withSize(url, Number(query.WIDTH) / 2, Number(query.HEIGHT) / 2);
   rows.push({
     name: name.replace('Geoportal - ', ''),
     kind,
-    base,
-    wide,
     url,
+    half,
     grid: layer.singleTile ? ortoGrid : null,
-    // The cell of the same grid, as the ortho service draws it: the overlays are
-    // transparent, so this is what the editor shows underneath them.
+    // The photo under the overlay: the grid of the view for a one-image layer, the
+    // cell of the same place for a layer of cells (the overlays are transparent, so
+    // this is what the editor draws underneath them).
     bg: layer.singleTile ? '' : ortos[`${row},${column}`] || '',
     detail: `${query.CRS || ''} ${query.WIDTH || ''}x${query.HEIGHT || ''}`.trim()
   });
 }
+
+// The numbers the script ships, so the page opens on them and not on a copy.
+const filter = env.internals.CONTRAST_FILTER;
+const brightness = (filter.colour.match(/brightness\(([\d.]+)\)/) || [])[1] || '2.2';
+const brightnessDark = (filter.dark.match(/brightness\(([\d.]+)\)/) || [])[1] || '2';
+const saturate = (filter.colour.match(/saturate\(([\d.]+)\)/) || [])[1] || '1.7';
+const edge = (filter.colour.match(/drop-shadow\(0 0 ([\d.]+)px/) || [])[1] || '1';
 
 // The layers are asked while zooming, so the cells of one view are of one place.
 const centre = env.map.getCenter();
@@ -129,12 +136,12 @@ const html = `<!doctype html>
 <html lang="pl"><head><meta charset="utf-8">
 <title>Geoportal WME - podglad czytelnosci warstw</title>
 <style>
-  :root { --brightness: 2.4; --brightness-dark: 2.1; --saturate: 1.8; --contrast: 1.1;
-          --thin: 0.8; --mid: 1.6; --halo: 2.6; --shadow: #fff; }
+  :root { --brightness: 2.2; --brightness-dark: 2; --saturate: 1.7; --edge: 1px;
+          --old-b: 2.4; --old-s: 1.8; --shadow: #fff; }   /* the old numbers, fixed */
   body { margin: 0; padding: 24px 28px 60px; background: #10141a; color: #e8eef6;
          font: 14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
   h1 { font-size: 20px; margin: 0 0 4px; }
-  p.lead { margin: 0 0 18px; color: #9fb0c4; max-width: 90ch; }
+  p.lead { margin: 0 0 18px; color: #9fb0c4; max-width: 96ch; }
   fieldset { border: 1px solid #263245; border-radius: 8px; padding: 12px 16px; margin: 0 0 22px; }
   legend { color: #9fb0c4; padding: 0 6px; }
   label { display: inline-block; margin-right: 18px; white-space: nowrap; }
@@ -145,18 +152,21 @@ const html = `<!doctype html>
   .row h2 small { color: #7f8ea3; font-weight: 400; margin-left: 8px; }
   .pair { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-start; }
   figure { margin: 0; }
-  figcaption { color: #7f8ea3; font-size: 12px; margin-bottom: 4px; }
+  figcaption { color: #7f8ea3; font-size: 12px; margin-bottom: 4px; min-height: 32px; }
   .shot { background: #1b2430; border: 1px solid #263245; border-radius: 6px; overflow: hidden;
           width: 300px; }
-  .shot img { display: block; width: 300px; height: auto; image-rendering: -webkit-optimize-contrast; }
-  .filtered img { filter: brightness(var(--brightness)) saturate(var(--saturate))
-                          drop-shadow(0 0 0 var(--shadow)) drop-shadow(0 0 0 var(--shadow)); }
-  .f-colour img { filter: brightness(var(--brightness)) saturate(var(--saturate)) contrast(var(--contrast))
-                          drop-shadow(0 0 var(--thin) var(--shadow)) drop-shadow(0 0 var(--mid) var(--shadow))
-                          drop-shadow(0 0 var(--halo) var(--shadow)); }
-  .f-dark img { filter: brightness(var(--brightness-dark)) saturate(1)
-                        drop-shadow(0 0 var(--thin) var(--shadow)) drop-shadow(0 0 var(--mid) var(--shadow))
-                        drop-shadow(0 0 var(--halo) var(--shadow)); }
+  .shot img { display: block; width: 300px; height: auto; }
+  /* The treatment of 1.6.0 before this round: three white halos, up to 2.6 px wide,
+     under a drawing whose ink was lifted harder. */
+  .old-f img { filter: brightness(var(--old-b)) saturate(var(--old-s)) contrast(1.1)
+                       drop-shadow(0 0 0.8px #fff) drop-shadow(0 0 1.6px #fff)
+                       drop-shadow(0 0 2.6px #fff); }
+  /* What the script does now: the ink lifted, the colour raised, and a hairline of
+     white under it - nothing else. */
+  .new-f img { filter: brightness(var(--brightness)) saturate(var(--saturate))
+                       drop-shadow(0 0 var(--edge) #fff) drop-shadow(0 0 var(--edge) #fff); }
+  .new-f.dark img { filter: brightness(var(--brightness-dark))
+                            drop-shadow(0 0 var(--edge) #fff) drop-shadow(0 0 var(--edge) #fff); }
   .stage { position: relative; width: 300px; }
   .bg-grid { position: absolute; inset: 0; display: grid; }
   .bg-grid img { width: 100%; height: 100%; display: block; }
@@ -166,102 +176,71 @@ const html = `<!doctype html>
   .sat { background: #2a2a24; }
   .shot.has-bg, .stage.has-bg { border-color: #3a4658; }
   .shot.has-bg { background-image: var(--bg); background-size: 100% 100%; }
+  .note { color: #7f8ea3; font-size: 12px; margin-top: 6px; }
   a { color: #7fd1ff; }
 </style></head>
 <body>
 <h1>Geoportal WME &mdash; podgl&#261;d czytelno&#347;ci warstw</h1>
 <p class="lead">
-  Ka&#380;da warstwa jest pokazana trzy razy: tak, jak j&#261; rysuje us&#322;uga (po lewej), jak widzi j&#261; skrypt
-  (rozja&#347;nienie tuszu, wzmocnienie koloru i bia&#322;a obw&oacute;dka pod rysunkiem) i - w trzeciej kolumnie -
-  jak widzi j&#261; skrypt, gdy poprosi us&#322;ug&#281; o ten sam obszar w mniejszej liczbie pikseli
-  (suwak <code>&times;m</code>) i rozci&#261;gnie obraz na tym samym miejscu: napisy us&#322;ugi, kt&oacute;rych
-  wielko&#347;ci nie da si&#281; zmieni&#263;, s&#261; wtedy <code>m</code> razy wi&#281;ksze.
-  Zmie&#324; liczby poni&#380;ej, a wszystkie podgl&#261;dy po prawej zmieni&#261; si&#281; od razu &mdash; powiedz,
-  kt&oacute;re warto wpisa&#263; do skryptu. Adresy s&#261; w podgl&#261;dzie dla por&oacute;wnania (bez filtra).
+  Ka&#380;da warstwa jest pokazana trzy razy: <b>tak rysuje us&#322;uga</b> (obraz w takim rozmiarze,
+  o jaki prosi skrypt &mdash; bez filtra), <b>tak wygl&#261;da&#322;a w poprzedniej wersji</b> (ten sam obszar
+  w po&#322;owie pikseli, rozci&#261;gni&#281;ty z powrotem na to samo miejsce pod potr&oacute;jn&#261; bia&#322;&#261;
+  po&#347;wiat&#261;) i <b>tak wygl&#261;da teraz</b> (obraz w swoim rozmiarze pod cienk&#261; bia&#322;&#261;
+  obw&oacute;dk&#261;). Trzecia kolumna s&#322;ucha suwak&oacute;w poni&#380;ej.
   Miejsce: Imbramowice na Dolnym &#346;l&#261;sku, ${centre.lat.toFixed(5)}, ${centre.lon.toFixed(5)}.
 </p>
 <fieldset><legend>Filtr warstw cienkich (na &#380;ywo)</legend>
   <label>jasno&#347;&#263; kolor&oacute;w <code>brightness()</code>
-    <input id="b" type="range" min="1" max="3" step="0.05" value="2.4"></label>
+    <input id="b" type="range" min="1" max="3" step="0.05" value="${brightness}"></label>
   <label>jasno&#347;&#263; czarnych linii
-    <input id="bd" type="range" min="1" max="3" step="0.05" value="2.1"></label>
+    <input id="bd" type="range" min="1" max="3" step="0.05" value="${brightnessDark}"></label>
   <label>kolor <code>saturate()</code>
-    <input id="s" type="range" min="1" max="3" step="0.05" value="1.8"></label>
-  <label>kontrast tuszu <code>contrast()</code>
-    <input id="k" type="range" min="1" max="1.6" step="0.02" value="1.1"></label>
-  <label>obw&oacute;dka szeroka
-    <input id="h" type="range" min="0" max="4" step="0.1" value="2.6"></label>
-  <label>obw&oacute;dka &#347;rednia
-    <input id="m2" type="range" min="0" max="3" step="0.1" value="1.6"></label>
-  <label>obw&oacute;dka cienka
-    <input id="t" type="range" min="0" max="2" step="0.1" value="0.8"></label>
-  <label>kolor obw&oacute;dki
-    <input id="c" type="color" value="#ffffff"></label>
-  <label>powi&#281;kszenie rysunku <code>&times;m</code>
-    <input id="m" type="range" min="1" max="3" step="0.5" value="2"></label>
-  <div>W skrypcie teraz: <code id="css">brightness(2.4) saturate(1.8) contrast(1.1)</code></div>
+    <input id="s" type="range" min="1" max="3" step="0.05" value="${saturate}"></label>
+  <label>obw&oacute;dka <code>drop-shadow</code> (px)
+    <input id="e" type="range" min="0" max="3" step="0.25" value="${edge}"></label>
+<div>W skrypcie teraz: <code id="css">brightness(2.2) saturate(1.7) drop-shadow(0 0 1px #fff) &times;2</code></div>
+  <div class="note">Kolumna &#347;rodkowa trzyma liczby poprzedniej wersji (1.6.0 przed t&#261; zmian&#261;):
+    jasno&#347;&#263; 2.4 / 2.1, <code>saturate(1.8)</code>, <code>contrast(1.1)</code> i trzy bia&#322;e
+    po&#347;wiaty 0.8 / 1.6 / 2.6 px &mdash; oraz obraz w po&#322;owie pikseli, rozci&#261;gni&#281;ty przez
+    przegl&#261;dark&#281;. To w&#322;a&#347;nie te liczby i to rozci&#261;gni&#281;cie dawa&#322;y
+    &bdquo;powi&#281;kszone, ale nie czystsze&rdquo; napisy.</div>
 </fieldset>
 ${rows.map(row => `<div class="row">
   <h2>${row.name}<small>${row.kind ? `filtr: ${row.kind}` : 'bez filtra (por&#243;wnanie)'} &middot; ${row.detail}</small></h2>
   <div class="pair">
-    <figure><figcaption>tak rysuje us&#322;uga (bez powi&#281;kszenia)</figcaption>
+    <figure><figcaption>tak rysuje us&#322;uga &mdash; obraz w rozmiarze, o jaki prosi skrypt</figcaption>
       <div class="shot sat${row.bg ? ' has-bg' : ''}"${row.bg ? ` style="--bg:url('${row.bg}')"` : ''}>
-        ${row.grid ? `<div class="stage">${under(row, 'under')}<img class="over" src="${row.wide}" alt="${row.name}" loading="lazy"></div>`
-          : `<img src="${row.wide}" alt="${row.name}" loading="lazy">`}</div></figure>
-    ${row.kind ? `<figure class="filtered f-${row.kind}"><figcaption>tak widzi skrypt</figcaption>
+        ${row.grid ? `<div class="stage">${under(row, 'under')}<img class="over" src="${row.url}" alt="${row.name}" loading="lazy"></div>`
+          : `<img src="${row.url}" alt="${row.name}" loading="lazy">`}</div></figure>
+    ${row.kind ? `<figure class="old-f"><figcaption>poprzednio &mdash; po&#322;owa pikseli rozci&#261;gni&#281;ta, potr&oacute;jna po&#347;wiata</figcaption>
       <div class="stage sat${row.bg ? ' has-bg' : ''}"${row.bg ? ` style="--bg:url('${row.bg}')"` : ''}>
         ${under(row, 'under')}
-        <img class="over" src="${row.url}" alt="${row.name} z filtrem" loading="lazy"></div>
+        <img class="over" src="${row.half}" alt="${row.name} jak w poprzedniej wersji" loading="lazy"></div>
       </figure>
-      <figure class="filtered f-${row.kind} mag"><figcaption>skrypt z powi&#281;kszeniem &times;<span class="mv">2</span> (w skrypcie teraz: &times;${row.base})</figcaption>
+      <figure class="new-f${row.kind === 'dark' ? ' dark' : ''}"><figcaption>teraz &mdash; obraz 1:1 pod cienk&#261; bia&#322;&#261; obw&oacute;dk&#261;</figcaption>
       <div class="stage sat${row.bg ? ' has-bg' : ''}"${row.bg ? ` style="--bg:url('${row.bg}')"` : ''}>
         ${under(row, 'under')}
-        <img class="over" data-url="${row.wide}" alt="${row.name} z filtrem i powi&#281;kszeniem" loading="lazy"></div>
+        <img class="over" src="${row.url}" alt="${row.name} jak w skrypcie" loading="lazy"></div>
       </figure>` : ''}
   </div>
 </div>`).join('\n')}
 <script>
   const root = document.documentElement;
-  const fields = { b: '--brightness', bd: '--brightness-dark', s: '--saturate', k: '--contrast',
-                   h: '--halo', m2: '--mid', t: '--thin' };
+  // The numbers the script ships, so the page opens on them.
+  const shipped = { b: ${brightness}, bd: ${brightnessDark}, s: ${saturate}, e: ${edge} };
   const sync = () => {
-    Object.entries(fields).forEach(([id, name]) =>
-      root.style.setProperty(name, document.getElementById(id).value));
-    root.style.setProperty('--shadow', document.getElementById('c').value);
-    const hex = document.getElementById('c').value;
-    const short = hex.length === 7 && hex[1] === hex[2] && hex[3] === hex[4] && hex[5] === hex[6]
-      ? '#' + hex[1] + hex[3] + hex[5] + '' : hex;
-    const b = document.getElementById('b').value, bd = document.getElementById('bd').value;
-    const s = document.getElementById('s').value, k = document.getElementById('k').value;
-    const h = document.getElementById('h').value, mid = document.getElementById('m2').value;
-    const t = document.getElementById('t').value;
-    const halos = 'drop-shadow(0 0 ' + t + 'px ' + short + ') drop-shadow(0 0 ' + mid + 'px ' + short + ')' +
-      ' drop-shadow(0 0 ' + h + 'px ' + short + ')';
+    root.style.setProperty('--brightness', document.getElementById('b').value);
+    root.style.setProperty('--brightness-dark', document.getElementById('bd').value);
+    root.style.setProperty('--saturate', document.getElementById('s').value);
+    root.style.setProperty('--edge', document.getElementById('e').value + 'px');
+    const value = (id) => document.getElementById(id).value;
     document.getElementById('css').textContent =
-      'dark: brightness(' + bd + ') ' + halos + '  |  colour: brightness(' + b + ') saturate(' + s + ') contrast(' + k + ') ' + halos;
+      'dark: brightness(' + value('bd') + ') + ' + value('e') + ' px edge  |  ' +
+      'colour: brightness(' + value('b') + ') saturate(' + value('s') + ') + ' + value('e') + ' px edge';
   };
-  // The magnified column: the same address with the size divided by m, stretched
-  // over the same place - the browser does the rest, exactly as on the map.
-  const magnified = (url, m) => {
-    if (m <= 1) return url;
-    const u = new URL(url);
-    ['WIDTH', 'HEIGHT'].forEach(key => {
-      const value = Number(u.searchParams.get(key));
-      if (value) u.searchParams.set(key, Math.max(64, Math.round(value / m)));
-    });
-    return u.toString();
-  };
-  const resize = () => {
-    const m = Number(document.getElementById('m').value);
-    document.querySelectorAll('img[data-url]').forEach(img => {
-      img.src = magnified(img.dataset.url, m);
-    });
-    document.querySelectorAll('.mv').forEach(span => { span.textContent = String(m); });
-  };
-  ['b','bd','s','k','h','m2','t','c'].forEach(id => document.getElementById(id).addEventListener('input', sync));
-  document.getElementById('m').addEventListener('input', resize);
+  ['b', 'bd', 's', 'e'].forEach(id => document.getElementById(id).addEventListener('input', sync));
   sync();
-  resize();
+</script>
 </script>
 </body></html>
 `;
