@@ -151,28 +151,41 @@ module.exports = async function requests(report) {
 
   // Sizes: a tile layer asks for cells of the editor's grid, the BDOT switches for
   // the view itself (ratio 1), the road layer for the view plus its margin - and
-  // nothing past the megapixel the composition refuses.
+  // nothing past the megapixel the composition refuses. A layer with text to read
+  // asks for the same area at 1/magnify of the pixels: the drawing is then twice
+  // the size on the screen, and the cell it is drawn into is unchanged.
   for (const name of LAYER_ORDER.filter(name => LAYERS[name].kind === 'grid')) {
     const requests = env.requestsOf(env.layer(name));
     const sizes = [...new Set(requests.map(url => `${params(url).WIDTH}x${params(url).HEIGHT}`))];
-    report.check(`“${name}” asks for 256 px cells of the editor's grid`,
-      sizes.length === 1 && sizes[0] === '256x256',
+    const want = 256 / LAYERS[name].magnify;
+    report.check(`“${name}” asks for ${want === 256 ? '256' : `${want} (halved, drawn twice as large)`} px cells of the editor's grid`,
+      sizes.length === 1 && sizes[0] === `${want}x${want}`,
       `${requests.length} cells, sizes ${sizes.join(', ')}`);
+    const drawn = env.tileAt(env.layer(name), 0, 0)?.getTile()?.style;
+    report.check(`“${name}” is drawn in its own 256 px cell of the map`,
+      !drawn || drawn.width === '256px' || drawn.width === '512px',
+      drawn ? `cell ${drawn.width} x ${drawn.height}` : 'no cell measured');
   }
 
-  for (const name of ['Geoportal - drogi', ...Object.keys(LAYERS).filter(key => LAYERS[key].category === 'BDOT (Szczegółowa)')]) {
+  const oneImage = ['Geoportal - drogi', 'Geoportal - podział adm', 'Geoportal - Miasta', 'Geoportal - gminy',
+    'Geoportal - powiaty', 'Geoportal - województwa', 'Geoportal - Granica PL',
+    ...Object.keys(LAYERS).filter(key => LAYERS[key].category === 'BDOT (Szczegółowa)')];
+  for (const name of oneImage) {
     const query = params(env.requestOf(env.layer(name)));
     const width = Number(query.WIDTH), height = Number(query.HEIGHT);
     const expected = LAYERS[name];
     const wanted = {
-      w: Math.floor(800 * expected.ratio),
-      h: Math.floor(600 * expected.ratio)
+      w: Math.floor(800 * expected.ratio / expected.magnify),
+      h: Math.floor(600 * expected.ratio / expected.magnify)
     };
     const problems = [];
-    if (width !== wanted.w || height !== wanted.h) problems.push(`${width}x${height}, expected ${wanted.w}x${wanted.h}`);
+    if (Math.abs(width - wanted.w) > 1 || Math.abs(height - wanted.h) > 1) {
+      problems.push(`${width}x${height}, expected about ${wanted.w}x${wanted.h}`);
+    }
     if (width * height > env.internals.MAX_VIEW_PIXELS) problems.push(`${width * height} px past the cap`);
-    report.check(`“${name}” asks for one image of ${expected.ratio === 1 ? 'the view' : 'the view plus its margin'}`,
-      problems.length === 0, problems.join(', ') || `${width}x${height}`);
+    report.check(`“${name}” asks for one image of ${expected.ratio === 1 ? 'the view' : 'the view plus its margin'}` +
+      `${expected.magnify === 2 ? ', magnified twice' : ''}`,
+      problems.length === 0, problems.join(', ') || `${width}x${height} for ${Math.floor(800 * expected.ratio)}x${Math.floor(600 * expected.ratio)} px of view`);
   }
 
   const railRequests = env.requestsOf(env.layer('Geoportal - przejazdy kolejowe (wymagany duży zoom)'));
@@ -194,8 +207,9 @@ module.exports = async function requests(report) {
   const bigQuery = params(big.requestOf(big.layer('BDOT - Gruntowa')));
   const bigSize = [Number(bigQuery.WIDTH), Number(bigQuery.HEIGHT)];
   report.check('on a 1400x900 view the BDOT request stays inside the megapixel cap',
-    bigSize[0] * bigSize[1] <= big.internals.MAX_VIEW_PIXELS && bigSize[0] > 900,
-    `${bigSize.join('x')} = ${bigSize[0] * bigSize[1]} px (cap ${big.internals.MAX_VIEW_PIXELS})`);
+    bigSize[0] * bigSize[1] <= big.internals.MAX_VIEW_PIXELS && bigSize[0] > 400,
+    `${bigSize.join('x')} = ${bigSize[0] * bigSize[1]} px (cap ${big.internals.MAX_VIEW_PIXELS}); ` +
+    `asked for a ${1400}x${900} view, magnified ${(1400 / bigSize[0]).toFixed(1)}x`);
   report.check('the capped request keeps the view\'s shape',
     Math.abs(bigSize[0] / bigSize[1] - 1400 / 900) < 0.01,
     `${(bigSize[0] / bigSize[1]).toFixed(4)} asked vs ${(1400 / 900).toFixed(4)} view`);

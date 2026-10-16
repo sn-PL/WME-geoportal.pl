@@ -9,7 +9,7 @@ when a service refuses an image.
 ```bash
 cd test
 npm install        # jsdom, typescript, and the OpenLayers 2.13.1 sources (~2.9 MB, into .cache/)
-npm test           # ~35 s, 244 checks
+npm test           # ~45 s, 264 checks
 TILE_MANAGER=0 npm test       # the same checks on a map without OpenLayers' tile manager
 node run.cjs requests tiles   # only some suites
 TEST_VERBOSE=1 npm test       # let the page's console through
@@ -29,10 +29,10 @@ tests build their fixtures from the repository's own pinned files.
 | `source` | the file compiles, the userscript header is complete, the version in the header, in `SCRIPT_VERSION` and in the README agree, the script only names the Geoportal/greasyfork/WME hosts, no top-level constant is defined twice |
 | `types` | the script type-checks against the pinned WME SDK typings (`wme-sdk-typings.tgz`, version checked against the script's own `SDK_BASELINE`); the check itself is checked by breaking a copy of the script on purpose |
 | `startup` | the SDK handshake (async mode, id, name), the events it subscribes to, the map events it hooks as a fallback, waiting for `wme-ready`, a missing SDK method stopping with a message, a page without the layer card |
-| `layers` | one row per layer: service, `LAYERS`, format, `minZ`, request system, single-tile/ratio, slider, the contrast filter its ink asks for; the categories; the zoom gates; z-index stacking; the rank gate of the OSM layer; nothing is built for a layer that is off |
-| `requests` | the parameters of every request (WMS 1.3.0, `STYLES`, `TRANSPARENT`, `EXCEPTIONS=XML`, no `INIMAGE` anywhere), the axis order of a 4326 BBOX, the 2180 BBOX read back to WGS84 and compared with the area it draws, the size of each kind of request, and that the crossing at Imbramowice is inside the tile asked for |
+| `layers` | one row per layer: service, `LAYERS`, format, `minZ`, request system, single-tile/ratio, slider, the contrast filter its ink asks for, the magnification of its drawing; which layers ask for a magnified drawing, which ask for one image of the view rather than cells (a service places every label inside the image it is asked for) and which must keep cells; the categories; the zoom gates; z-index stacking; the rank gate of the OSM layer; nothing is built for a layer that is off |
+| `requests` | the parameters of every request (WMS 1.3.0, `STYLES`, `TRANSPARENT`, `EXCEPTIONS=XML`, no `INIMAGE` anywhere), the axis order of a 4326 BBOX, the 2180 BBOX read back to WGS84 and compared with the area it draws, the size of each kind of request - a layer with text to read asks for the same area at 1/magnify of the pixels, so the drawing is that many times larger on the screen - and that the crossing at Imbramowice is inside the tile asked for |
 | `tiles` | the ortho and OSM layers: the WMTS tile indices are the editor's own `z/x/y`, the image is drawn in the cell its indices name, above level 19 the level-19 tile is stretched, and one refused tile is one hole |
-| `recovery` | a refused image does not wipe the image already on screen, the retry comes ~1 s later under a fresh address and goes out once, a delivered retry releases the kept image, an image kept outside the layer's element is taken off the map when the layer is hidden, a tile layer keeps its other cells, and the previous view OpenLayers keeps on the map while the new cells are drawn goes as soon as the grid is complete (not 2.5 s later, and never while a cell is still missing) |
+| `recovery` | a refused image does not wipe the image already on screen, the retry comes ~1 s later under a fresh address and goes out once, a delivered retry releases the kept image, hiding the layer leaves nothing of it on the map; three rules for the picture OpenLayers keeps of the previous view: a zoom carries none of it over - for a layer of cells too, where OpenLayers would rescale it to the new resolution and draw it over the new view - a pan keeps it at the size it was drawn (a refused refresh included) until a delivered image releases it, and a layer of cells never keeps one at all |
 | `menu` | the group and its categories, the switch of every layer, which layers have an opacity slider and which must not, no instruction text, a collapsed category, the controls coming back after WME replaces the card, the native-checkbox fallback |
 | `settings` | a first visit, saved layers/opacities/collapsed categories, unknown layer names, unreadable JSON, and that a slider-less layer is never dimmed by a value an older version saved |
 | `coordinates` | EPSG:2180 against PROJ 9.5.1 (to the millimetre, at ten points across the country) and the inverse across a grid over Poland, the `requestImageSize` cap, and the zoom level derived from a request |
@@ -54,10 +54,12 @@ It prints what came back for one request per layer (image size, or the document 
 refused request is answered with). A refusal is normal - these services shed
 bursts - which is why the run only fails with `--strict`.
 
-`test/tools/filter-preview.mjs` writes (and can serve) a page that shows a layer's
-own request twice - as the service sends it and with the filter the script puts on
-the layer, over the ortho tile of the same cell - with the filter's numbers as live
-controls, so the readability of the thin-stroke layers can be judged and tuned in a
+`test/tools/filter-preview.mjs` writes (and can serve) a page that shows each layer
+three times - as the service sends it, with the filter the script puts on the layer,
+and with that filter plus the magnification (the request at 1/m of the pixels,
+stretched over the same cell) - over the ortho tile of the same cell, with the
+filter's numbers and the magnification as live controls, so the readability of the
+thin-stroke layers and of the labels drawn into them can be judged and tuned in a
 browser:
 
 ```bash

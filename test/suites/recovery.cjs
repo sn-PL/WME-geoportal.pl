@@ -80,22 +80,33 @@ module.exports = async function recovery(report) {
     !env.isFailed(tile) && released,
     `failed: ${env.isFailed(tile)}, kept image: ${released ? 'released' : 'still held'}`);
 
-  // An image kept for a layer that is then hidden must not stay on the map: after
-  // a zoom OpenLayers puts that image next to the base layer, outside the layer's
-  // own element, where hiding the layer cannot hide it.
+  // An image kept for a layer that is then hidden must not stay on the map.
+  // OpenLayers puts it next to the base layer - outside the layer's own element -
+  // exactly when it rescales it, which is the case that leaves a picture behind
+  // that hiding the layer cannot hide; that rescaling is gone (see the zoom rules
+  // below), so whatever is kept sits inside the layer's element.
   await env.sleep(50);
   env.map.setCenter(env.map.getCenter(), env.map.getZoom() - 1, false, true);
   await env.sleep(120);
-  const outside = drogi.backBuffer;
-  report.check('after a zoom the image kept for the layer sits outside the layer\'s element',
-    outside !== null && outside.parentNode !== drogi.div,
-    outside ? `parent ${outside.parentNode === drogi.div ? 'inside' : 'outside'} the layer element` : 'nothing kept');
-  const keptOnMap = outside;
+  report.check('after a zoom nothing of the image the layer was showing is kept',
+    drogi.backBuffer === null,
+    drogi.backBuffer ? `kept: parent ${drogi.backBuffer.parentNode === drogi.div ? 'inside' : 'outside'} the layer element` : 'nothing kept');
+  env.deliver(env.tileAt(drogi, 0, 0));
+  const panCentre = env.map.getCenter();
+  const panStep = env.map.getResolution() * 700;
+  env.map.setCenter(new env.OL.LonLat(panCentre.lon + panStep, panCentre.lat), env.map.getZoom());
+  await env.sleep(120);
+  const keptOnMap = drogi.backBuffer;
+  report.check('an image kept through a pan sits inside the layer\'s own element',
+    keptOnMap !== null && keptOnMap.parentNode === drogi.div,
+    keptOnMap ? `parent ${keptOnMap.parentNode === drogi.div ? 'inside' : 'outside'} the layer element` : 'nothing kept');
   env.registry['Geoportal - drogi'].setVisibility(false);
   await env.sleep(60);
-  report.check('hiding the layer takes the image kept for it off the map',
-    drogi.backBuffer === null && (keptOnMap === null || keptOnMap.parentNode === null),
-    `backBuffer: ${drogi.backBuffer === null ? 'released' : 'kept'}, element on the map: ${keptOnMap && keptOnMap.parentNode !== null}`);
+  report.check('hiding the layer leaves nothing of it on the map',
+    drogi.backBuffer === null ||
+    keptOnMap.parentNode === null || keptOnMap.parentNode === drogi.div,
+    drogi.backBuffer === null ? 'the kept image was released'
+      : `kept inside the hidden layer element: ${keptOnMap.parentNode === drogi.div}`);
   env.registry['Geoportal - drogi'].setVisibility(true);
 
   // The tile layers: a refused cell is one hole, and after the retry the grid is
@@ -119,43 +130,118 @@ module.exports = async function recovery(report) {
     env.recorded.uncaught.length === 0, env.recorded.uncaught.join(' | ') || 'none');
   env.close();
 
-  // OpenLayers keeps the view the layer was drawing before - its "back buffer" -
-  // on the map while the new cells are on their way, and lets it go 2.5 s after the
-  // last of them arrived. Where the service refuses part of its answers, which is
-  // what the reports show, that picture stands over the new view for much longer:
-  // the parcel numbers in the report were doubled and faint - the same labels, at
-  // the offset of the view they were rendered for. Nothing is waiting for it once
-  // the grid is complete, so it has to go then, not 2.5 s later.
-  const doubled = await boot({ enabled: 'all' });
-  await doubled.drawAll();
-  const parcels = doubled.layer('Geoportal - podział adm');
-  doubled.tilesWithImage(parcels).forEach(tile => doubled.deliver(tile));
-  const centre = doubled.map.getCenter();
-  doubled.map.setCenter(centre, doubled.map.getZoom() + 1, false, true);
-  await doubled.sleep(150);
-  report.check('a zoom leaves the previous view of the layer on the map while the new cells are drawn',
-    parcels.backBuffer !== null && parcels.backBuffer.childNodes.length > 0,
-    parcels.backBuffer ? `${parcels.backBuffer.childNodes.length} cells of the previous view` : 'nothing kept');
-
-  const refusedCell = doubled.tilesWithImage(parcels)[2];
-  doubled.giveUp(refusedCell);
-  await doubled.sleep(1300); // the layer's own retry, which asks for the whole grid again
-  const redrawn = doubled.tilesWithImage(parcels);
-  redrawn.filter(tile => tile !== refusedCell).forEach(tile => doubled.deliver(tile));
-  await doubled.sleep(50);
-  report.check('with one cell still missing the previous view stays, so the hole is not empty',
-    parcels.backBuffer !== null,
-    parcels.backBuffer ? 'kept over the missing cell' : 'dropped although a cell is missing');
-
-  doubled.deliver(refusedCell);
-  await doubled.sleep(20);
-  report.check('the previous view goes as soon as the whole grid is drawn, not 2.5 s later',
+  // OpenLayers keeps the picture of the view the layer was drawing while the next
+  // one is on its way, and lets it go 2.5 s after the last cell arrived. Three
+  // rules for it, one per way the view changes:
+  //
+  //  - a zoom rescales that picture to the new resolution and keeps it over the
+  //    new view. It is not the layer's drawing any more, it is the old geometry
+  //    and its labels at the size of the old zoom - the doubled, washed-out
+  //    repeat of the parcels report. A zoom therefore starts from nothing.
+  //  - a pan at the same zoom keeps it: still the right size, and it covers the
+  //    map until the new image is delivered, a refused refresh included.
+  //  - on a grid of cells it goes as soon as every cell is drawn, not 2.5 s later:
+  //    over a service that refuses part of its answers those 2.5 s stretch into
+  //    minutes in which the old and the new drawing stand on top of one another.
+  const zooming = await boot({ enabled: 'all' });
+  await zooming.drawAll();
+  const parcels = zooming.layer('Geoportal - podział adm');   // one image of the view
+  const road = zooming.layer('Geoportal - drogi');            // one image of the view
+  zooming.tilesWithImage(parcels).forEach(tile => zooming.deliver(tile));
+  zooming.deliver(zooming.tileAt(road, 0, 0));
+  await zooming.setZoom(19);
+  await zooming.sleep(120);
+  report.check('a zoom does not carry the previous image of a one-image layer over the new view',
     parcels.backBuffer === null,
-    parcels.backBuffer === null ? 'dropped on the last cell' : 'still drawn under the new view');
-  report.check('and no cell of the grid was left behind with it',
-    redrawn.every(tile => tile.imgDiv && tile.imgDiv.src) && !env.isFailed(refusedCell),
-    `${redrawn.length} cells still have their image`);
-  doubled.close();
+    parcels.backBuffer ? `${parcels.backBuffer.childNodes.length} old image(s) still drawn` : 'the new view starts empty');
+  report.check('the same for the road layer',
+    road.backBuffer === null,
+    road.backBuffer ? `${road.backBuffer.childNodes.length} old image(s) still drawn` : 'the new view starts empty');
+  report.check('and the new view is asked for straight away',
+    zooming.requestsOf(parcels).length > 0 && zooming.requestsOf(road).length > 0,
+    `${zooming.requestsOf(parcels).length} + ${zooming.requestsOf(road).length} requests of the new view`);
+
+  // The parcels are one image of the view now, so the hold that keeps a delivered
+  // image on the map through a refused refresh is what stands between a refusal and
+  // an empty layer: the service that refused is asked again about a second later.
+  const heldParcels = await boot({ enabled: 'all' });
+  await heldParcels.drawAll();
+  const parcelsHeld = heldParcels.layer('Geoportal - podział adm');
+  const parcelsTile = heldParcels.tileAt(parcelsHeld, 0, 0);
+  heldParcels.deliver(parcelsTile);
+  const shown = plain(parcelsTile.imgDiv.src);
+  await pan(heldParcels, 300);
+  heldParcels.giveUp(parcelsTile);
+  await heldParcels.sleep(60);
+  const parcelsKept = parcelsHeld.backBuffer && parcelsHeld.backBuffer.querySelector('img');
+  report.check('the parcels layer is one image of the view, and a refused refresh keeps it on the map',
+    parcelsHeld.singleTile === true && parcelsHeld.ratio === 1 && Boolean(parcelsKept) &&
+    plain(parcelsKept.src) === shown,
+    parcelsKept ? 'the refused view is still covered by the delivered one' : 'the layer went empty');
+  heldParcels.close();
+
+  // A layer of cells at a zoom: OpenLayers rescales the previous view's container
+  // to the new resolution and draws it over the new view; that is where the old
+  // drawing - old geometry and old label positions - doubled what the new view
+  // shows. Nothing of it may be carried over.
+  const topo = zooming.layer('Geoportal - obiekty topograficzne');
+  const topoCells = zooming.tilesWithImage(topo);
+  report.check('a layer of cells was drawing before the zoom', topoCells.length > 0, `${topoCells.length} cells`);
+  await zooming.setZoom(19);
+  await zooming.sleep(150);
+  report.check('a zoom does not carry the previous cells of the layer over the new view',
+    topo.backBuffer === null,
+    topo.backBuffer ? `${topo.backBuffer.childNodes.length} old cells still drawn` : 'the new view starts empty');
+
+  // A pan at the same zoom: the picture the layer was showing stays while the new
+  // image is fetched - and a refused refresh must not take it away.
+  zooming.deliver(zooming.tileAt(road, 0, 0));
+  const shownBefore = plain(zooming.tileAt(road, 0, 0).imgDiv.src);
+  const centre = zooming.map.getCenter();
+  const step = zooming.map.getResolution() * 700;
+  zooming.map.setCenter(new zooming.OL.LonLat(centre.lon + step, centre.lat), zooming.map.getZoom());
+  await zooming.sleep(120);
+  const kept = road.backBuffer && road.backBuffer.querySelector('img');
+  report.check('a pan keeps the picture the layer was showing, at the size it was drawn',
+    Boolean(kept) && plain(kept.src) === shownBefore,
+    kept ? 'the image of the previous view is on the map' : 'nothing kept');
+  zooming.giveUp(zooming.tileAt(road, 0, 0));
+  await zooming.sleep(50);
+  report.check('a refused refresh of the new view does not take it away',
+    road.backBuffer !== null && Boolean(road.backBuffer.querySelector('img')),
+    road.backBuffer ? 'the delivered view is still on the map' : 'the map went empty');
+  await zooming.sleep(1400); // the layer's own retry
+  zooming.deliver(zooming.tileAt(road, 0, 0));
+  await zooming.sleep(30);
+  report.check('a delivered image lets it go',
+    road.backBuffer === null || road.backBuffer.childNodes.length === 0,
+    road.backBuffer ? 'still held' : 'released');
+  zooming.close();
+
+  // A layer of cells never carries a picture of the previous view through a pan -
+  // OpenLayers builds that container for these layers only when the scale changes,
+  // which is the case the report showed. A cell the service refuses is a hole with
+  // the editor's base map behind it, and the rest of the grid is untouched.
+  const gridded = await boot({ enabled: 'all' });
+  await gridded.drawAll();
+  const grid = gridded.layer('Geoportal - obiekty topograficzne');
+  gridded.tilesWithImage(grid).forEach(tile => gridded.deliver(tile));
+  const griddedCentre = gridded.map.getCenter();
+  const griddedStep = gridded.map.getResolution() * 900;
+  gridded.map.setCenter(new gridded.OL.LonLat(griddedCentre.lon + griddedStep, griddedCentre.lat), gridded.map.getZoom());
+  await gridded.sleep(150);
+  report.check('a pan of a layer of cells leaves no drawing of the previous view on the map',
+    grid.backBuffer === null,
+    grid.backBuffer ? `${grid.backBuffer.childNodes.length} old cells still drawn` : 'the new view is drawn on its own');
+  const held = gridded.tilesWithImage(grid);
+  gridded.giveUp(held[0]);
+  held.slice(1).forEach(tile => gridded.deliver(tile));
+  await gridded.sleep(50);
+  report.check('a refused cell of the new view does not disturb the rest of the grid',
+    gridded.tilesWithImage(grid).length === held.length,
+    `${gridded.tilesWithImage(grid).length} of ${held.length} cells still have their image`);
+  gridded.close();
+
 
   // Retries belong to the view they were started in: as long as nothing is
   // missing, a new view asks under clean addresses - a stamped address is only
