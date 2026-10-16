@@ -1,0 +1,17 @@
+{
+  "name": "wme-geoportal-pl-tests",
+  "version": "1.6.0",
+  "private": true,
+  "description": "Tests for geoportal.user.js: the real OpenLayers 2.13.1 on a jsdom map, with the WME SDK and the Layers menu mocked",
+  "license": "MIT",
+  "scripts": {
+    "prepare": "node tools/prepare-openlayers.mjs",
+    "test": "node run.cjs",
+    "refresh-openlayers": "node tools/prepare-openlayers.mjs --force",
+    "check-types": "node tools/check-types.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "^26.1.0",
+    "typescript": "^5.9.0"
+  }
+}

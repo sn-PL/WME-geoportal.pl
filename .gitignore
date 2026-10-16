@@ -1,0 +1,4 @@
+node_modules/
+
+# test fixtures downloaded/built on demand (see test/README.md)
+test/.cache/
