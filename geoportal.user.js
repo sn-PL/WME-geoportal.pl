@@ -23,7 +23,7 @@
  */
 
 /* Changelog:
- *  1.6.0 - OSM, the standard photo layer, the level crossings and the topographic objects come as tiles of the editor's own map, because those services refuse a whole-window picture; the crossings and the detailed BDOT switches ask in EPSG:2180, the system those services draw in - asked in 4326 they answer with a picture of their own error instead of the data (drawn into the image, because OpenLayers asks a WMS for INIMAGE exceptions); every service is now asked for its errors as documents instead of pictures, so a failure leaves a hole in the layer instead of a grey plate of text on the map; the overlays drawn in thin dark lines ("Topografia / Inne") get a white halo and a lift of brightness instead of an opacity slider, and so do the BDOT switches; no view picture is asked for past about a megapixel, and a setting that cannot be read no longer stops the script.
+ *  1.6.0 - OSM, the standard photo layer, the level crossings and the topographic objects come as tiles of the editor's own map, because those services refuse a whole-window picture; the crossings and the detailed BDOT switches ask in EPSG:2180, the system those services draw in - asked in 4326 they answer with a picture of their own error instead of the data (drawn into the image, because OpenLayers asks a WMS for INIMAGE exceptions); every service is now asked for its errors as documents instead of pictures, so a failure leaves a hole in the layer instead of a grey plate of text on the map; the overlays drawn in thin dark lines ("Topografia / Inne") get a white halo and a lift of brightness instead of an opacity slider, and so do the BDOT switches; the parcels, the towns, the communes, the counties, the provinces and the state border, drawn in faint colours that the photos swallow, are lifted and saturated the same way, so their small labels read over the imagery too; the picture of the previous view that OpenLayers leaves on the map while a new one is drawn is taken off as soon as the new view is complete - over a service that refuses part of its answers it used to stand there much longer, doubling the parcel numbers; no view picture is asked for past about a megapixel, and a setting that cannot be read no longer stops the script.
  *  1.5.5 - WME SDK v2.374: async SDK mode; version-tolerant startup, events, zoom filtering and controls; photo layers request JPEG without the needless transparency flag, as one image per view instead of a tile grid (the ortho WMS answers whole tile batches with 404); a refused image is requested three times - once immediately, then twice at a growing distance - and a view image that OpenLayers gave up on is requested again instead of leaving the map empty.
  *  1.5.4 - Use SDK readiness, state and events; guard WMS and preserve the Layers menu.
  *  1.5.2 - New layer names address, streets WMS endpoint
@@ -78,12 +78,20 @@
   // that they send a document or nothing at all), so a view image is asked for at
   // the largest size that still comes back and stretched over the view.
   const MAX_VIEW_PIXELS = 1200000;
-  // The overlays whose own services draw them in thin dark lines (see the
-  // "Topografia / Inne" layers) are hard to read over the editor's imagery and
-  // all but vanish over its photo layers. A white halo and a lift of brightness
-  // make them readable there, which an opacity slider cannot do - a black line
-  // can only get dimmer.
-  const HALO_FILTER = "drop-shadow(0 0 1.5px #fff) brightness(1.7)";
+  // These services draw their overlays as thin strokes and small labels: black for
+  // the roads and the topographic objects, a faint colour for the parcels and the
+  // borders (blue parcels, teal and navy town labels, red counties, grey state
+  // border). Over the editor's imagery - and over its photo base map in particular
+  // - a dark line has nothing to contrast with and a faint colour is swallowed.
+  // A filter on the layer's own element lifts the ink, keeps its colour and puts a
+  // white halo under it, so the same layer reads over any base map; an opacity
+  // slider cannot do that - a black line can only get dimmer. `dark` is for the
+  // drawings made of black strokes, `colour` for the ones drawn in a faint colour,
+  // which need the colour raised as well.
+  const CONTRAST_FILTER = {
+    dark: "brightness(1.75) drop-shadow(0 0 0.9px #fff) drop-shadow(0 0 1.8px #fff)",
+    colour: "brightness(1.8) saturate(1.5) drop-shadow(0 0 0.9px #fff) drop-shadow(0 0 1.8px #fff)"
+  };
   // Geodetic constants of EPSG:2180 (PUWG 1992): GRS80, transverse Mercator with
   // the scale factor 0.9993, central meridian 19°E and the usual false origin.
   const PUWG = { a: 6378137, f: 1 / 298.257222101, k0: 0.9993, meridian: 19, falseEasting: 500000, falseNorthing: -5300000 };
@@ -493,13 +501,14 @@
      * @param {any} layer layer built by createLayer or createTileLayer
      * @param {{tried: number, timer: any, stamp: number|null, holding: boolean}} recovery its state
      * @param {number} opacity
-     * @param {any} options the layer's definition options (only `halo` is read)
+     * @param {any} options the layer's definition options (only `contrast` is read)
      * @returns {any} the layer
      */
     installLayer(layer, recovery, opacity, options = {}) {
       layer.setOpacity(opacity);
       this.map.addLayer(layer);
-      if (options.halo && layer.div) layer.div.style.filter = HALO_FILTER;
+      const filter = CONTRAST_FILTER[options.contrast];
+      if (filter && layer.div) layer.div.style.filter = filter;
       this.retryMissingImage(layer, recovery);
       if (!this.olMap && layer.map) {
         this.olMap = layer.map;
@@ -599,6 +608,16 @@
           if (!missing) {
             recovery.holding = false;
             restart();
+            // OpenLayers keeps the previous view's tiles - its "back buffer" - on
+            // the map while the new ones are on their way, and only lets it go
+            // 2.5 s after the last of them arrived. Where a service refuses part of
+            // its answers, which is what these do, the new grid can stay incomplete
+            // for much longer than that, and meanwhile the previous view is still
+            // drawn under the new one - the same labels, at the offset of the view
+            // they were rendered for, which is the doubled and faint numbers seen
+            // in the reports. The grid is complete right here, so nothing is
+            // waiting for that picture any more: drop it now instead of later.
+            if (!layer.singleTile && layer.backBuffer && !layer.numLoadingTiles) layer.removeBackBuffer();
           }
         },
         tileerror: () => {
@@ -961,21 +980,21 @@
       // out empty on a normal screen. As tiles of the editor's grid every request
       // is one small cell and each of them is a hole at worst. It draws in
       // EPSG:4326, which is what the map itself speaks (see the note above it).
-      this.createWMSLayer("Geoportal - przejazdy kolejowe (wymagany duży zoom)", this.WMS_SERVICES.rail, "PMT_Linie_Kolejowe_Sp__z_o_o_,Kopalnia_Piasku_KOTLARNIA_-_Linie_Kolejowe_Sp__z__o_o_,Jastrzębska_Spółka_Kolejowa_Sp__z_o_o_,Infra_SILESIA_S_A_,EUROTERMINAL_Sławków_Sp__z_o_o_,Dolnośląska_Służba_Dróg_i_Kolei_we_Wrocławiu,CARGOTOR_Sp__z_o_o_,PKP_SKM_w_Trójmieście_Sp__z_o_o_,PKP_Linia_Hutnicza_Szerokotorowa_Sp__z_o__o_,PKP_Polskie_Linie_Kolejowe", "image/png", { singleTile: false, minZ: 15, crs: "EPSG:2180", hasOpacity: false, halo: true });
-      this.createWMSLayer("Geoportal - drogi", this.WMS_SERVICES.mileage, "planowane,wbudowie,pikietaz,drugorzedne,glowne,ekspresowe,autostrady", "image/png", { minZ: 12, hasOpacity: false, halo: true });
-      this.createWMSLayer("Geoportal - podział adm", this.WMS_SERVICES.parcels, "dzialki,numery_dzialek", "image/png", { singleTile: false, minZ: 15, hasOpacity: false });
+      this.createWMSLayer("Geoportal - przejazdy kolejowe (wymagany duży zoom)", this.WMS_SERVICES.rail, "PMT_Linie_Kolejowe_Sp__z_o_o_,Kopalnia_Piasku_KOTLARNIA_-_Linie_Kolejowe_Sp__z__o_o_,Jastrzębska_Spółka_Kolejowa_Sp__z_o_o_,Infra_SILESIA_S_A_,EUROTERMINAL_Sławków_Sp__z_o_o_,Dolnośląska_Służba_Dróg_i_Kolei_we_Wrocławiu,CARGOTOR_Sp__z_o_o_,PKP_SKM_w_Trójmieście_Sp__z_o_o_,PKP_Linia_Hutnicza_Szerokotorowa_Sp__z_o__o_,PKP_Polskie_Linie_Kolejowe", "image/png", { singleTile: false, minZ: 15, crs: "EPSG:2180", hasOpacity: false, contrast: "dark" });
+      this.createWMSLayer("Geoportal - drogi", this.WMS_SERVICES.mileage, "planowane,wbudowie,pikietaz,drugorzedne,glowne,ekspresowe,autostrady", "image/png", { minZ: 12, hasOpacity: false, contrast: "dark" });
+      this.createWMSLayer("Geoportal - podział adm", this.WMS_SERVICES.parcels, "dzialki,numery_dzialek", "image/png", { singleTile: false, minZ: 15, hasOpacity: false, contrast: "colour" });
 
-      this.createWMSLayer("Geoportal - Miasta", this.WMS_SERVICES.border_city, "A06_Granice_obrebow_ewidencyjnych,A05_Granice_jednostek_ewidencyjnych,A04_Granice_miast", "image/png", { singleTile: false,  minZ: 12, hasOpacity: false });
-      this.createWMSLayer("Geoportal - gminy", this.WMS_SERVICES.border_city, "A03_Granice_gmin", "image/png", { singleTile: false, minZ: 10, hasOpacity: false });
-      this.createWMSLayer("Geoportal - powiaty", this.WMS_SERVICES.border_city, "A02_Granice_powiatow", "image/png", { singleTile: false, minZ: 10, hasOpacity: false });
-      this.createWMSLayer("Geoportal - województwa", this.WMS_SERVICES.border_city, "A01_Granice_wojewodztw", "image/png", { singleTile: false, minZ: 8, hasOpacity: false });
-      this.createWMSLayer("Geoportal - Granica PL", this.WMS_SERVICES.border_city, "A00_Granice_panstwa", "image/png", { singleTile: false, minZ: 0, hasOpacity: false });
+      this.createWMSLayer("Geoportal - Miasta", this.WMS_SERVICES.border_city, "A06_Granice_obrebow_ewidencyjnych,A05_Granice_jednostek_ewidencyjnych,A04_Granice_miast", "image/png", { singleTile: false,  minZ: 12, hasOpacity: false, contrast: "colour" });
+      this.createWMSLayer("Geoportal - gminy", this.WMS_SERVICES.border_city, "A03_Granice_gmin", "image/png", { singleTile: false, minZ: 10, hasOpacity: false, contrast: "colour" });
+      this.createWMSLayer("Geoportal - powiaty", this.WMS_SERVICES.border_city, "A02_Granice_powiatow", "image/png", { singleTile: false, minZ: 10, hasOpacity: false, contrast: "colour" });
+      this.createWMSLayer("Geoportal - województwa", this.WMS_SERVICES.border_city, "A01_Granice_wojewodztw", "image/png", { singleTile: false, minZ: 8, hasOpacity: false, contrast: "colour" });
+      this.createWMSLayer("Geoportal - Granica PL", this.WMS_SERVICES.border_city, "A00_Granice_panstwa", "image/png", { singleTile: false, minZ: 0, hasOpacity: false, contrast: "colour" });
 
       // Topographic objects of the counties that published them. The integration
       // behind this address hands every request to the WMS of the county it
       // covers, and those answer in EPSG:2180 only - in 4326 the whole country
       // comes back as an empty image, which is what the layer showed.
-      this.createWMSLayer("Geoportal - obiekty topograficzne", this.WMS_SERVICES.topo, "bdot", "image/png", { singleTile: false, minZ: 16, crs: "EPSG:2180", hasOpacity: false, halo: true });
+      this.createWMSLayer("Geoportal - obiekty topograficzne", this.WMS_SERVICES.topo, "bdot", "image/png", { singleTile: false, minZ: 16, crs: "EPSG:2180", hasOpacity: false, contrast: "dark" });
 
       // The composition draws these classes from about 1:10 000 up, and it draws
       // them in the national system EPSG:2180: asked in 4326 it answers one and
@@ -984,7 +1003,7 @@
       // switch asks for one image of the view itself (ratio 1) instead of
       // OpenLayers' larger default, and none of them has an opacity slider.
       Object.entries(BDOT_LAYERS).forEach(([name, classNames]) => {
-        this.createWMSLayer(name, this.WMS_SERVICES.kompozycja, classNames, "image/png", { minZ: 16, ratio: 1, crs: "EPSG:2180", hasOpacity: false });
+        this.createWMSLayer(name, this.WMS_SERVICES.kompozycja, classNames, "image/png", { minZ: 16, ratio: 1, crs: "EPSG:2180", hasOpacity: false, contrast: "colour" });
       });
     }
 
@@ -1175,7 +1194,7 @@
   /** @type {any} */ (window).__geoportalPl = Object.assign(geoportal, {
     internals: {
       VERSION: SCRIPT_VERSION, to2180, bounds2180, BDOT_LAYERS, PUWG,
-      MAX_VIEW_PIXELS, IMAGE_RETRY_DELAYS, TILE_MAX_ZOOM, HALO_FILTER, Z_INDEX_BASE
+      MAX_VIEW_PIXELS, IMAGE_RETRY_DELAYS, TILE_MAX_ZOOM, CONTRAST_FILTER, Z_INDEX_BASE
     }
   });
 })();

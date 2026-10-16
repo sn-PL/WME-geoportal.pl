@@ -119,6 +119,44 @@ module.exports = async function recovery(report) {
     env.recorded.uncaught.length === 0, env.recorded.uncaught.join(' | ') || 'none');
   env.close();
 
+  // OpenLayers keeps the view the layer was drawing before - its "back buffer" -
+  // on the map while the new cells are on their way, and lets it go 2.5 s after the
+  // last of them arrived. Where the service refuses part of its answers, which is
+  // what the reports show, that picture stands over the new view for much longer:
+  // the parcel numbers in the report were doubled and faint - the same labels, at
+  // the offset of the view they were rendered for. Nothing is waiting for it once
+  // the grid is complete, so it has to go then, not 2.5 s later.
+  const doubled = await boot({ enabled: 'all' });
+  await doubled.drawAll();
+  const parcels = doubled.layer('Geoportal - podział adm');
+  doubled.tilesWithImage(parcels).forEach(tile => doubled.deliver(tile));
+  const centre = doubled.map.getCenter();
+  doubled.map.setCenter(centre, doubled.map.getZoom() + 1, false, true);
+  await doubled.sleep(150);
+  report.check('a zoom leaves the previous view of the layer on the map while the new cells are drawn',
+    parcels.backBuffer !== null && parcels.backBuffer.childNodes.length > 0,
+    parcels.backBuffer ? `${parcels.backBuffer.childNodes.length} cells of the previous view` : 'nothing kept');
+
+  const refusedCell = doubled.tilesWithImage(parcels)[2];
+  doubled.giveUp(refusedCell);
+  await doubled.sleep(1300); // the layer's own retry, which asks for the whole grid again
+  const redrawn = doubled.tilesWithImage(parcels);
+  redrawn.filter(tile => tile !== refusedCell).forEach(tile => doubled.deliver(tile));
+  await doubled.sleep(50);
+  report.check('with one cell still missing the previous view stays, so the hole is not empty',
+    parcels.backBuffer !== null,
+    parcels.backBuffer ? 'kept over the missing cell' : 'dropped although a cell is missing');
+
+  doubled.deliver(refusedCell);
+  await doubled.sleep(20);
+  report.check('the previous view goes as soon as the whole grid is drawn, not 2.5 s later',
+    parcels.backBuffer === null,
+    parcels.backBuffer === null ? 'dropped on the last cell' : 'still drawn under the new view');
+  report.check('and no cell of the grid was left behind with it',
+    redrawn.every(tile => tile.imgDiv && tile.imgDiv.src) && !env.isFailed(refusedCell),
+    `${redrawn.length} cells still have their image`);
+  doubled.close();
+
   // Retries belong to the view they were started in: as long as nothing is
   // missing, a new view asks under clean addresses - a stamped address is only
   // for an image that has to get past a cache holding the refusal.

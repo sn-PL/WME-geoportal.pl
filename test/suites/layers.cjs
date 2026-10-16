@@ -45,7 +45,7 @@ module.exports = async function layers(report) {
     }
     if ((options.minZ ?? 0) !== expected.minZ) problems.push(`minZ=${options.minZ}`);
     if ((options.hasOpacity !== false) !== expected.hasOpacity) problems.push(`hasOpacity=${options.hasOpacity}`);
-    if (Boolean(options.halo) !== expected.halo) problems.push(`halo=${options.halo}`);
+    if ((options.contrast ?? false) !== expected.contrast) problems.push(`contrast=${options.contrast}`);
     if (!layer) problems.push('no layer instance');
     report.check(`“${name}” is what the list says it is`, problems.length === 0, problems.join(', '));
   }
@@ -58,22 +58,42 @@ module.exports = async function layers(report) {
     LAYER_ORDER.every(name => inCategories.includes(name)),
     `${inCategories.length} entries for ${LAYER_ORDER.length} layers`);
 
-  // The layers whose services draw thin dark lines are the ones with the halo
-  // filter; the rest must not be filtered at all (a filter is expensive).
-  const halos = names.filter(name => {
+  // These services draw thin strokes and small labels, and the editor's imagery
+  // swallows them: every such layer carries the same lifted filter, and no other
+  // layer is filtered at all (a filter is expensive).
+  const filtered = names.filter(name => {
     const filter = registry[name].instance?.div?.style?.filter || '';
     return filter.includes('drop-shadow');
   });
-  const expectedHalos = Object.entries(LAYERS).filter(([, e]) => e.halo).map(([name]) => name);
-  report.check('exactly the thin-line overlays carry the halo filter',
-    halos.length === expectedHalos.length && expectedHalos.every(name => halos.includes(name)),
-    `${halos.length} layers: ${halos.map(name => name.replace('Geoportal - ', '')).join(', ')}`);
-  report.check('the halo is the white outline plus the brightness lift',
-    halos.every(name => {
+  const expectedFiltered = Object.entries(LAYERS).filter(([, e]) => e.contrast).map(([name]) => name);
+  report.check('exactly the thin-drawn overlays carry the contrast filter',
+    filtered.length === expectedFiltered.length && expectedFiltered.every(name => filtered.includes(name)),
+    `${filtered.length} layers of ${names.length}: ${filtered.map(name => name.replace('Geoportal - ', '')).join(', ')}`);
+  report.check('every one of the six boundary layers of the report was among them',
+    ['Geoportal - podział adm', 'Geoportal - Miasta', 'Geoportal - gminy', 'Geoportal - powiaty',
+      'Geoportal - województwa', 'Geoportal - Granica PL'].every(name => filtered.includes(name)),
+    'parcels, towns, communes, counties, provinces, state border');
+  report.check('each filtered layer carries the filter its ink asks for, and nothing else',
+    filtered.every(name => {
       const filter = registry[name].instance.div.style.filter;
-      return filter.includes('#fff') || filter.includes('#ffffff');
-    }) && env.internals.HALO_FILTER.includes('brightness'),
-    env.internals.HALO_FILTER);
+      return filter === env.internals.CONTRAST_FILTER[LAYERS[name].contrast];
+    }),
+    Object.entries(env.internals.CONTRAST_FILTER).map(([kind, value]) => `${kind}: ${value}`).join(' | '));
+  report.check('both filters put a white halo under the drawing and lift the ink',
+    Object.values(env.internals.CONTRAST_FILTER).every(filter =>
+      (filter.match(/#fff/g) || []).length === 2 && /brightness\(\d/.test(filter)),
+    'two white halos (a thin one and a wide one) plus a brightness lift');
+  report.check('the faint colours of the boundaries are raised as well, the black strokes are not',
+    /saturate\(\d/.test(env.internals.CONTRAST_FILTER.colour) &&
+    !/saturate/.test(env.internals.CONTRAST_FILTER.dark) &&
+    env.internals.CONTRAST_FILTER.colour.length > env.internals.CONTRAST_FILTER.dark.length,
+    `colour ${env.internals.CONTRAST_FILTER.colour}`);
+  const weakest = Math.min(...filtered.map(name => {
+    const filter = registry[name].instance.div.style.filter;
+    return Number((filter.match(/brightness\((\d+(?:\.\d+)?)\)/) || [])[1] || 0);
+  }));
+  report.check('no filtered layer is left dimmer than the halo of 1.6.0, and the halo is wider',
+    weakest >= 1.7, `the weakest brightness lift is ${weakest} (1.6.0 used 1.7 with a single 1.5 px halo)`);
 
   // Opacity: a layer without a slider always draws at full opacity, whatever an
   // older version left in the settings.
