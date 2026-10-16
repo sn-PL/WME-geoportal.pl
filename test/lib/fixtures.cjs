@@ -125,27 +125,27 @@ const LAYERS = {
     kind: 'grid', service: SERVICES.border, category: 'Podział Administracyjny',
     layers: 'A06_Granice_obrebow_ewidencyjnych,A05_Granice_jednostek_ewidencyjnych,A04_Granice_miast',
     format: 'image/png', minZ: 12, singleTile: false, ratio: 1.5, crs: 'EPSG:4326',
-    hasOpacity: false, magnify: 2, contrast: 'case'
+    hasOpacity: false, magnify: 2, contrast: 'outline'
   },
   'Geoportal - gminy': {
     kind: 'grid', service: SERVICES.border, category: 'Podział Administracyjny',
     layers: 'A03_Granice_gmin', format: 'image/png', minZ: 10, singleTile: false,
-    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, magnify: 2, contrast: 'case'
+    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, magnify: 2, contrast: 'outline'
   },
   'Geoportal - powiaty': {
     kind: 'grid', service: SERVICES.border, category: 'Podział Administracyjny',
     layers: 'A02_Granice_powiatow', format: 'image/png', minZ: 10, singleTile: false,
-    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, magnify: 2, contrast: 'case'
+    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, magnify: 2, contrast: 'outline'
   },
   'Geoportal - województwa': {
     kind: 'grid', service: SERVICES.border, category: 'Podział Administracyjny',
     layers: 'A01_Granice_wojewodztw', format: 'image/png', minZ: 8, singleTile: false,
-    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, magnify: 2, contrast: 'case'
+    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, magnify: 2, contrast: 'outline'
   },
   'Geoportal - Granica PL': {
     kind: 'grid', service: SERVICES.border, category: 'Podział Administracyjny',
     layers: 'A00_Granice_panstwa', format: 'image/png', minZ: 0, singleTile: false,
-    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, magnify: 2, contrast: 'case'
+    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, magnify: 2, contrast: 'outline'
   },
   'Geoportal - obiekty topograficzne': {
     kind: 'grid', service: SERVICES.topo, category: 'Topografia / Inne',

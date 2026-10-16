@@ -91,43 +91,56 @@ module.exports = async function layers(report) {
   const svg = registry['Geoportal - podział adm'].instance.div.ownerDocument
     .getElementById('geoportal-label-filters');
   const filterElement = id => svg && svg.querySelector(`filter[id="${id}"]`);
-  const sharp = filterElement('geoportal-labels');
-  const white = filterElement('geoportal-labels-white');
-  report.check('the filters that re-draw the ink are on the page, each of them once',
-    !!svg && !!sharp && !!white &&
-    (svg.querySelectorAll('filter').length === 2) &&
+  const ink = filterElement('geoportal-labels-ink');
+  report.check('the filter that re-draws the ink is on the page, once',
+    !!svg && !!ink && (svg.querySelectorAll('filter').length === 1) &&
     Object.values(filters).every(filter => !filter.includes('url(#') ||
-      filter.includes('url(#geoportal-labels')),
-    svg ? `${svg.querySelectorAll('filter').length} filters, referred to by name` : 'no filters on the page');
+      filter.includes('url(#geoportal-labels-ink)')),
+    svg ? `${svg.querySelectorAll('filter').length} filter, pointed at by ${Object.values(filters).filter(f => f.includes('url(#')).length} layers` : 'no filter on the page');
   report.check('every edge is snapped back onto the pixel grid, nothing is left half lit',
-    [sharp, white].every(filter => {
-      const transfer = filter && filter.querySelector('feFuncA');
+    (() => {
+      const transfer = ink && ink.querySelector('feFuncA');
       return transfer && transfer.getAttribute('type') === 'linear' &&
         Number(transfer.getAttribute('slope')) >= 3;
-    }),
+    })(),
     'alpha * slope + intercept, i.e. every pixel is ink or it is not');
-  report.check('the white letters carry a one-pixel casing and nothing is blurred',
-    !!white && white.querySelector('feMorphology')?.getAttribute('operator') === 'dilate' &&
-    white.querySelector('feMorphology')?.getAttribute('radius') === '1' &&
-    white.querySelector('feFlood')?.getAttribute('flood-color') === '#000' &&
-    !!!(white.querySelector('feGaussianBlur') || white.querySelector('feDropShadow')) &&
+  report.check('the letters carry a one-pixel casing grown from their own shape, nothing is blurred',
+    !!ink && ink.querySelector('feMorphology')?.getAttribute('operator') === 'dilate' &&
+    ink.querySelector('feMorphology')?.getAttribute('radius') === '1' &&
+    ink.querySelector('feFlood')?.getAttribute('flood-color') === '#000' &&
+    !!!(ink.querySelector('feGaussianBlur') || ink.querySelector('feDropShadow')) &&
     Object.values(filters).every(filter =>
       [...filter.matchAll(/drop-shadow\(0 0 ([\d.]+)px/g)].every(match => Number(match[1]) <= 1)),
     'dilate one pixel, flood black, composite under the ink');
-  report.check('the layers whose letters are the information are drawn white and re-drawn sharp',
-    /^brightness\(0\) invert\(1\) url\(#geoportal-labels-white\)$/.test(filters.white) &&
+  const lettered = names.filter(name => LAYERS[name].contrast === 'white');
+  report.check('every drawing that is strokes and points is white ink with a black outline',
+    /^brightness\(0\) invert\(1\) url\(#geoportal-labels-ink\)$/.test(filters.white) &&
+    lettered.length === 7 &&
     ['Geoportal - podział adm', 'Geoportal - obiekty topograficzne', 'Geoportal - adresy',
-      'Geoportal - ulice', 'Geoportal - place', 'Geoportal - przejazdy kolejowe (wymagany duży zoom)']
+      'Geoportal - ulice', 'Geoportal - place', 'Geoportal - adresy, place i ulice w jednym',
+      'Geoportal - przejazdy kolejowe (wymagany duży zoom)']
       .every(name => LAYERS[name].contrast === 'white'),
-    'parcels, topographic objects, addresses, streets, places, crossings');
-  report.check('the service\'s own white names keep their colour and are re-drawn sharp',
-    /^brightness\([\d.]+\) saturate\([\d.]+\) url\(#geoportal-labels\)$/.test(filters.case) &&
+    `${lettered.length} layers: parcels, topographic objects, addresses, streets, places, crossings`);
+  // The five boundary layers draw translucent coloured areas along with their names,
+  // so they cannot be made white without painting those areas over the map as white
+  // slabs. Their names come from the service as a very pale letter on a slightly
+  // paler plate of its own (measured: 230, 217, 231 against 250, 248, 251), so they
+  // are pulled apart with contrast instead of being lifted into the same white, and
+  // they take the same one pixel of black outline as every other layer.
+  report.check('the layers that draw coloured areas keep their ink and only gain the black outline',
+    filters.outline === 'drop-shadow(0 0 1px #000) drop-shadow(0 0 1px #000)' &&
     ['Geoportal - Miasta', 'Geoportal - gminy', 'Geoportal - powiaty', 'Geoportal - województwa',
-      'Geoportal - Granica PL'].every(name => LAYERS[name].contrast === 'case'),
-    'towns, communes, counties, provinces, state border');
+      'Geoportal - Granica PL'].every(name => LAYERS[name].contrast === 'outline') &&
+    Object.entries(LAYERS).filter(([, entry]) => entry.contrast === 'outline').length === 5,
+    filters.outline);
+  report.check('nothing of those layers is recoloured, brightened or thresholded',
+    !filters.outline.includes('invert') && !filters.outline.includes('brightness') &&
+    !filters.outline.includes('url(#') && !filters.outline.includes('#fff'),
+    'the coloured areas, the boundary lines and the pale lettering stay what the service drew');
   report.check('only the drawings whose colour is the map itself keep a white casing',
     LAYERS['Geoportal - drogi'].contrast === 'dark' &&
-    Object.entries(LAYERS).filter(([, entry]) => entry.contrast === 'colour').length === 8,
+    Object.entries(LAYERS).filter(([, entry]) => entry.contrast === 'colour').length === 8 &&
+    filters.dark.includes('#fff') && filters.colour.includes('#fff'),
     'the road classes and the BDOT surfaces');
 
   // A magnified drawing - the layer asks for the same area at half the pixels and the
@@ -138,7 +151,7 @@ module.exports = async function layers(report) {
   report.check('every drawing whose letters are the information asks for half the pixels',
     magnified.length === 12 &&
     magnified.every(name => registry[name].definition.options.magnify === env.internals.LABEL_MAGNIFY) &&
-    magnified.every(name => ['white', 'case'].includes(LAYERS[name].contrast)),
+    magnified.every(name => LAYERS[name].contrast === 'white' || LAYERS[name].contrast === 'outline'),
     `${magnified.length} layers, all at twice the size`);
   report.check('no other layer is drawn at a size other than its own',
     names.filter(name => registry[name].definition.options.magnify === undefined ||

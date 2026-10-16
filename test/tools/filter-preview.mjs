@@ -135,23 +135,29 @@ const html = `<!doctype html>
   .stage .under { position: absolute; inset: 0; background-position: center;
                   background-size: 100% 100%; }
   .stage .over { position: absolute; inset: 0; width: 100%; height: 100%; }
-  /* What every version up to round 22 did to these layers: a white halo two pixels
-     wide around the drawing, which at the size of a service letter is the letter. */
-  .prev .over { filter: ${filter.colour}; }
+  /* What round 23 did: the alpha threshold applied to the whole drawing, which
+     hardened the wide white halo the boundary service draws under its names into one
+     pale slab and left the letters inside it barely darker than the slab. */
+  .prev .over { filter: brightness(1.8) saturate(1.4) url(#geoportal-round23); }
   /* What the script does now: the image of half the pixels, which the service drew
      twice as large, stretched back over the cell and put through the filter of the
      layer's own kind - the letters white, every edge snapped onto the pixel grid. */
   .now :is(.over) { }
 </style>
 ${svg}
+<svg id="geoportal-round23-filter" width="0" height="0" style="position:absolute;left:0;top:0;pointer-events:none">
+  <defs><filter id="geoportal-round23" x="-20%" y="-20%" width="140%" height="140%"
+    color-interpolation-filters="sRGB"><feComponentTransfer><feFuncA type="linear" slope="4"
+    intercept="-1.1"/></feComponentTransfer></filter></defs>
+</svg>
 </head>
 <body>
 <h1>Geoportal WME &mdash; podgl&#261;d podpis&oacute;w</h1>
 <p class="lead">
   Trzy razy ten sam kawa&#322;ek mapy, w ramkach tej samej wielko&#347;ci:
   <b>tak rysuje us&#322;uga</b> (kom&oacute;rka 256 px, bez filtra),
-  <b>tak by&#322;o do tej pory</b> (ten sam obraz 1:1 pod bia&#322;&#261; po&#347;wiat&#261;
-  <code>${filter.colour}</code>) i
+  <b>tak pokaza&#322;a to runda 23</b> (pr&#243;g krycia na ca&#322;ym rysunku &mdash; z bladego
+  napisu i w&#322;asnej bia&#322;ej otoczki us&#322;ugi robi&#322; si&#281; jeden jasny plac) i
   <b>tak jest teraz</b> (obraz w po&#322;owie pikseli, rozci&#261;gni&#281;ty na to samo miejsce,
   pod filtrem, kt&oacute;ry robi z niego bia&#322;e litery z tward&#261; kraw&#281;dzi&#261;).
   Miejsce: Imbramowice, ${centre.lat.toFixed(5)}, ${centre.lon.toFixed(5)}.
@@ -159,9 +165,10 @@ ${svg}
 <fieldset><legend>Podgl&#261;d</legend>
   <label>powi&#281;kszenie ramki <input id="z" type="range" min="1" max="3" step="1" value="2">
     <code id="zx">2&times;</code></label>
-  <div class="note">Filtry s&#261; te same, kt&oacute;rych u&#380;ywa skrypt: <code>white</code>
-    i <code>case</code> to filtry SVG z tej strony, <code>dark</code> i <code>colour</code>
-    (warstwy kolorowe: drogi, BDOT) bez zmian od rundy 20.</div>
+  <div class="note">Trzecia kolumna u&#380;ywa filtr&oacute;w, kt&oacute;re skrypt ma teraz:
+    <code>white</code> (kreski i punkty: bia&#322;y atrament + czarna obw&oacute;dka),
+    <code>outline</code> (warstwy granic: <b>rysunek us&#322;ugi bez zmian</b> + ta sama czarna
+    obw&oacute;dka), <code>dark</code> i <code>colour</code> (drogi, BDOT) bez zmian od rundy 20.</div>
 </fieldset>
 ${rows.map(row => `<div class="row">
   <h2>${row.name}<small>${row.kind ? `filtr: ${row.kind}` : 'bez filtra'} &middot; ${row.detail}</small></h2>
@@ -169,10 +176,10 @@ ${rows.map(row => `<div class="row">
     <figure><figcaption>tak rysuje us&#322;uga &mdash; 256 px, bez filtra</figcaption>
       <div class="stage"${row.bg ? ` style="background-image:url('${row.bg}')"` : ''}>
         <img class="over" src="${row.full}" alt="${row.name}" loading="lazy"></div></figure>
-    <figure class="prev"><figcaption>do tej pory &mdash; 1:1 pod po&#347;wiat&#261;</figcaption>
+    <figure class="prev"><figcaption>runda 23 &mdash; pr&#243;g na ca&#322;ym rysunku (zbity plac)</figcaption>
       <div class="stage"${row.bg ? ` style="background-image:url('${row.bg}')"` : ''}>
         <img class="over" src="${row.full}" alt="${row.name} jak do tej pory" loading="lazy"></div></figure>
-    <figure class="now"><figcaption>teraz &mdash; po&#322;owa pikseli, bia&#322;e litery, twarda kraw&#281;d&#378;</figcaption>
+    <figure class="now"><figcaption>teraz &mdash; po&#322;owa pikseli, kolor us&#322;ugi, czarna obw&oacute;dka</figcaption>
       <div class="stage"${row.bg ? ` style="background-image:url('${row.bg}')"` : ''}>
         <img class="over" src="${row.url}" alt="${row.name} jak teraz" loading="lazy"
              style="filter:${row.kind ? filter[row.kind] : 'none'}"></div></figure>
