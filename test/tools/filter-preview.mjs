@@ -94,7 +94,7 @@ const html = `<!doctype html>
 <html lang="pl"><head><meta charset="utf-8">
 <title>Geoportal WME - podglad czytelnosci warstw</title>
 <style>
-  :root { --brightness: 1.8; --saturate: 1.5; --halo: 1.8; --thin: 0.9; --shadow: #fff; }
+  :root { --brightness: 1.8; --brightness-dark: 1.75; --saturate: 1.5; --halo: 1.8; --thin: 0.9; --shadow: #fff; }
   body { margin: 0; padding: 24px 28px 60px; background: #10141a; color: #e8eef6;
          font: 14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
   h1 { font-size: 20px; margin: 0 0 4px; }
@@ -117,7 +117,7 @@ const html = `<!doctype html>
                           drop-shadow(0 0 0 var(--shadow)) drop-shadow(0 0 0 var(--shadow)); }
   .f-colour img { filter: brightness(var(--brightness)) saturate(var(--saturate))
                           drop-shadow(0 0 var(--thin) var(--shadow)) drop-shadow(0 0 var(--halo) var(--shadow)); }
-  .f-dark img { filter: brightness(var(--brightness)) saturate(1)
+  .f-dark img { filter: brightness(var(--brightness-dark)) saturate(1)
                         drop-shadow(0 0 var(--thin) var(--shadow)) drop-shadow(0 0 var(--halo) var(--shadow)); }
   .stage { position: relative; width: 300px; }
   .stage .under { position: absolute; inset: 0; background-color: #1b2430;
@@ -138,8 +138,10 @@ const html = `<!doctype html>
   Miejsce: Imbramowice na Dolnym &#346;l&#261;sku, ${centre.lat.toFixed(5)}, ${centre.lon.toFixed(5)}.
 </p>
 <fieldset><legend>Filtr warstw cienkich (na &#380;ywo)</legend>
-  <label>jasno&#347;&#263; <code>brightness()</code>
+  <label>jasno&#347;&#263; kolor&oacute;w <code>brightness()</code>
     <input id="b" type="range" min="1" max="2.6" step="0.05" value="1.8"></label>
+  <label>jasno&#347;&#263; czarnych linii
+    <input id="bd" type="range" min="1" max="2.6" step="0.05" value="1.75"></label>
   <label>kolor <code>saturate()</code>
     <input id="s" type="range" min="1" max="2.4" step="0.05" value="1.5"></label>
   <label>obw&oacute;dka <code>drop-shadow()</code>
@@ -165,7 +167,7 @@ ${rows.map(row => `<div class="row">
 </div>`).join('\n')}
 <script>
   const root = document.documentElement;
-  const fields = { b: '--brightness', s: '--saturate', h: '--halo', t: '--thin' };
+  const fields = { b: '--brightness', bd: '--brightness-dark', s: '--saturate', h: '--halo', t: '--thin' };
   const sync = () => {
     Object.entries(fields).forEach(([id, name]) =>
       root.style.setProperty(name, document.getElementById(id).value));
@@ -173,13 +175,14 @@ ${rows.map(row => `<div class="row">
     const hex = document.getElementById('c').value;
     const short = hex.length === 7 && hex[1] === hex[2] && hex[3] === hex[4] && hex[5] === hex[6]
       ? '#' + hex[1] + hex[3] + hex[5] + '' : hex;
-    const b = document.getElementById('b').value, s = document.getElementById('s').value;
+    const b = document.getElementById('b').value, bd = document.getElementById('bd').value;
+    const s = document.getElementById('s').value;
     const h = document.getElementById('h').value, t = document.getElementById('t').value;
     document.getElementById('css').textContent =
-      'dark: brightness(' + b + ') drop-shadow(0 0 ' + t + 'px ' + short + ') drop-shadow(0 0 ' + h + 'px ' + short + ')' +
+      'dark: brightness(' + bd + ') drop-shadow(0 0 ' + t + 'px ' + short + ') drop-shadow(0 0 ' + h + 'px ' + short + ')' +
       '  |  colour: brightness(' + b + ') saturate(' + s + ') drop-shadow(0 0 ' + t + 'px ' + short + ') drop-shadow(0 0 ' + h + 'px ' + short + ')';
   };
-  ['b','s','h','t','c'].forEach(id => document.getElementById(id).addEventListener('input', sync));
+  ['b','bd','s','h','t','c'].forEach(id => document.getElementById(id).addEventListener('input', sync));
   sync();
 </script>
 </body></html>
