@@ -7,11 +7,11 @@
  *     (since round 25 a cell of those layers is 1024 px and the image asked for is
  *     512 px, so a window is built from a few images instead of dozens - the letter
  *     treatment itself is unchanged),
- *   - as the previous version showed it (the drawing of 1:1 under the wide white
- *     halo of the rounds up to 22, which is what the reports are about),
+ *   - as the previous version showed it (the same white re-draw with the threshold
+ *     straight onto the doubled raster - the stepped contour of the round-26 report),
  *   - as the script shows it now (the image of half the pixels, which makes the
  *     service draw its letters twice as big, stretched back and put through the
- *     filters that snap every edge onto the pixel grid).
+ *     filters that smooth the contour and snap every edge onto the pixel grid).
  *
  * The drawings are loaded straight from the Geoportal, for the address the script's
  * own request has, and both treatments use the script's own filter strings, so what
@@ -77,6 +77,7 @@ function withSize(url, width, height) {
   return `${url.split('?')[0]}?${query}`;
 }
 
+const filters = env.internals.CONTRAST_FILTER;
 const rows = [];
 for (const name of SHOW) {
   const layer = env.layer(name);
@@ -97,18 +98,28 @@ for (const name of SHOW) {
   // The same cell with the pixels the map draws it with: that is the drawing of the
   // previous rounds, at one pixel per pixel.
   const full = withSize(url, Number(query.WIDTH) * 2, Number(query.HEIGHT) * 2);
+  // What the middle column shows: for the drawings that are re-drawn white, the same
+  // chain without the smoothing of round 26 - that is the stepped contour of the
+  // report. For the layers whose ink is left alone (the boundaries, the roads, the
+  // BDOT surfaces) nothing changed in this round, and the column says so.
+  const previous = kind === 'white'
+    ? { css: 'brightness(0) invert(1) url(#geoportal-previous)', caption: 'poprzednio &mdash; pr&#243;g bez wyg&#322;adzania (schodki)' }
+    : { css: filters[kind] || 'none', caption: kind === 'outline'
+        ? 'bez zmian od rundy 24 &mdash; rysunek us&#322;ugi + obw&oacute;dka'
+        : 'bez zmian od rundy 20 &mdash; rozja&#347;nienie i bia&#322;a kraw&#281;d&#378;' };
   rows.push({
     name: name.replace('Geoportal - ', ''),
     kind,
     url,
     full,
+    previous,
     bg: layer.singleTile ? '' : ortos[`${row},${column}`] || '',
     detail: `${query.CRS || ''} ${query.WIDTH || ''}x${query.HEIGHT || ''}`.trim()
   });
 }
 
-// The numbers and the filter elements the script ships, so the page opens on them.
-const filter = env.internals.CONTRAST_FILTER;
+// The filter elements the script ships, so the page opens on them.
+const filter = filters;
 const svg = env.internals.CONTRAST_SVG;
 const centre = env.map.getCenter();
 env.close();
@@ -141,17 +152,23 @@ const html = `<!doctype html>
   /* What round 23 did: the alpha threshold applied to the whole drawing, which
      hardened the wide white halo the boundary service draws under its names into one
      pale slab and left the letters inside it barely darker than the slab. */
-  .prev .over { filter: brightness(1.8) saturate(1.4) url(#geoportal-round23); }
+  /* The previous round: the same white re-draw and the same one pixel casing, but the
+     threshold straight onto the doubled raster - every edge of the service's pixel a
+     step of two screen pixels, which is the ragged lettering of the report. The filter
+     string comes per row, so the middle column says what each layer actually did. */
   /* What the script does now: the image of half the pixels, which the service drew
      twice as large, stretched back over the cell and put through the filter of the
-     layer's own kind - the letters white, every edge snapped onto the pixel grid. */
+     layer's own kind - the letters white, the contour smoothed, every edge snapped
+     onto the pixel grid. */
   .now :is(.over) { }
 </style>
 ${svg}
-<svg id="geoportal-round23-filter" width="0" height="0" style="position:absolute;left:0;top:0;pointer-events:none">
-  <defs><filter id="geoportal-round23" x="-20%" y="-20%" width="140%" height="140%"
-    color-interpolation-filters="sRGB"><feComponentTransfer><feFuncA type="linear" slope="4"
-    intercept="-1.1"/></feComponentTransfer></filter></defs>
+<svg id="geoportal-previous-filter" width="0" height="0" style="position:absolute;left:0;top:0;pointer-events:none">
+  <defs><filter id="geoportal-previous" x="-20%" y="-20%" width="140%" height="140%"
+    color-interpolation-filters="sRGB"><feComponentTransfer result="ink"><feFuncA type="linear" slope="4"
+    intercept="-1.1"/></feComponentTransfer><feMorphology in="ink" operator="dilate" radius="1"
+    result="grown"/><feFlood flood-color="#000" result="black"/><feComposite in="black" in2="grown"
+    operator="in" result="casing"/><feMerge><feMergeNode in="casing"/><feMergeNode in="ink"/></feMerge></filter></defs>
 </svg>
 </head>
 <body>
@@ -159,10 +176,10 @@ ${svg}
 <p class="lead">
   Trzy razy ten sam kawa&#322;ek mapy, w ramkach tej samej wielko&#347;ci:
   <b>tak rysuje us&#322;uga</b> (obraz 1:1, bez filtra),
-  <b>tak pokaza&#322;a to runda 23</b> (pr&#243;g krycia na ca&#322;ym rysunku &mdash; z bladego
-  napisu i w&#322;asnej bia&#322;ej otoczki us&#322;ugi robi&#322; si&#281; jeden jasny plac) i
-  <b>tak jest teraz</b> (obraz w po&#322;owie pikseli, rozci&#261;gni&#281;ty na to samo miejsce,
-  pod filtrem, kt&oacute;ry robi z niego bia&#322;e litery z tward&#261; kraw&#281;dzi&#261;).
+  <b>tak by&#322;o poprzednio</b> (pr&#243;g wprost na podwojonym rastrze &mdash; ka&#380;da
+  kraw&#281;d&#378; piksela us&#322;ugi to na ekranie schodek z dw&oacute;ch pikseli) i
+  <b>tak jest teraz</b> (ten sam obraz, ale przed progiem lekko rozmyty, wi&#281;c kontur
+  jest g&#322;adki, a kraw&#281;d&#378; nadal twarda).
   Miejsce: Imbramowice, ${centre.lat.toFixed(5)}, ${centre.lon.toFixed(5)}.
 </p>
 <fieldset><legend>Podgl&#261;d</legend>
@@ -174,7 +191,10 @@ ${svg}
     obw&oacute;dka), <code>dark</code> i <code>colour</code> (drogi, BDOT) bez zmian od rundy 20.
     Od rundy 25 kom&oacute;rka tych warstw ma 1024 px, a obraz 512 px (by&#322;o 256/128) &mdash;
     liter to nie zmienia, a okno mapy sk&#322;ada si&#281; z kilku obrazk&oacute;w zamiast
-    kilkudziesi&#281;ciu, wi&#281;c us&#322;uga rysuje mniej kopii tych samych podpis&oacute;w.</div>
+    kilkudziesi&#281;ciu, wi&#281;c us&#322;uga rysuje mniej kopii tych samych podpis&oacute;w.
+    Runda 26 dodaje przed progiem rozmycie 0,8 px: kontur litery przestaje by&#263;
+    schodkowy, a cienkie linie rysunku zostaj&#261; (ich &347;rodek po rozmyciu nadal
+    przekracza pr&oacute;g).</div>
 </fieldset>
 ${rows.map(row => `<div class="row">
   <h2>${row.name}<small>${row.kind ? `filtr: ${row.kind}` : 'bez filtra'} &middot; ${row.detail}</small></h2>
@@ -182,10 +202,11 @@ ${rows.map(row => `<div class="row">
     <figure><figcaption>tak rysuje us&#322;uga &mdash; obraz 1:1, bez filtra</figcaption>
       <div class="stage"${row.bg ? ` style="background-image:url('${row.bg}')"` : ''}>
         <img class="over" src="${row.full}" alt="${row.name}" loading="lazy"></div></figure>
-    <figure class="prev"><figcaption>runda 23 &mdash; pr&#243;g na ca&#322;ym rysunku (zbity plac)</figcaption>
+    <figure class="prev"><figcaption>${row.previous.caption}</figcaption>
       <div class="stage"${row.bg ? ` style="background-image:url('${row.bg}')"` : ''}>
-        <img class="over" src="${row.full}" alt="${row.name} jak do tej pory" loading="lazy"></div></figure>
-    <figure class="now"><figcaption>teraz &mdash; po&#322;owa pikseli, kolor us&#322;ugi, czarna obw&oacute;dka</figcaption>
+        <img class="over" src="${row.full}" alt="${row.name} jak do tej pory" loading="lazy"
+             style="filter:${row.previous.css}"></div></figure>
+    <figure class="now"><figcaption>teraz &mdash; kontur wyg&#322;adzony, twarda kraw&#281;d&#378;, czarna obw&oacute;dka</figcaption>
       <div class="stage"${row.bg ? ` style="background-image:url('${row.bg}')"` : ''}>
         <img class="over" src="${row.url}" alt="${row.name} jak teraz" loading="lazy"
              style="filter:${row.kind ? filter[row.kind] : 'none'}"></div></figure>

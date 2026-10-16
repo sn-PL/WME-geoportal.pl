@@ -101,17 +101,50 @@ module.exports = async function layers(report) {
     (() => {
       const transfer = ink && ink.querySelector('feFuncA');
       return transfer && transfer.getAttribute('type') === 'linear' &&
-        Number(transfer.getAttribute('slope')) >= 3;
+        Number(transfer.getAttribute('slope')) >= 10;
     })(),
-    'alpha * slope + intercept, i.e. every pixel is ink or it is not');
-  report.check('the letters carry a one-pixel casing grown from their own shape, nothing is blurred',
+    'alpha * slope + intercept with a steep slope, i.e. every pixel is ink or it is not');
+  // Round 26: the threshold alone left the staircases of the doubled raster in the
+  // letter's contour (every edge of the service's pixel is two screen pixels of step).
+  // A small blur in front of the threshold turns those steps into ramps, and the
+  // threshold puts the colour back onto one line of a ramp - a smooth contour with a
+  // hard edge. It has to be small: the drawing's own one pixel lines must survive it.
+  report.check('the contour is smoothed before it is snapped, and the smoothing is small',
+    (() => {
+      const blurs = ink ? [...ink.querySelectorAll('feGaussianBlur, feDropShadow')] : [];
+      if (blurs.length !== 1) return false;
+      const sigma = Number(blurs[0].getAttribute('stdDeviation'));
+      const first = ink.firstElementChild;
+      const order = first === blurs[0] && blurs[0].nextElementSibling?.tagName === 'feComponentTransfer';
+      return Number.isFinite(sigma) && sigma > 0.4 && sigma <= 1 && order;
+    })(),
+    'one feGaussianBlur of 0.4-1 px in front of the transfer: the step of one raster pixel becomes a ramp');
+  report.check('the letters carry a one-pixel casing grown from their own shape',
     !!ink && ink.querySelector('feMorphology')?.getAttribute('operator') === 'dilate' &&
     ink.querySelector('feMorphology')?.getAttribute('radius') === '1' &&
     ink.querySelector('feFlood')?.getAttribute('flood-color') === '#000' &&
-    !!!(ink.querySelector('feGaussianBlur') || ink.querySelector('feDropShadow')) &&
     Object.values(filters).every(filter =>
       [...filter.matchAll(/drop-shadow\(0 0 ([\d.]+)px/g)].every(match => Number(match[1]) <= 1)),
     'dilate one pixel, flood black, composite under the ink');
+  report.check('the smoothing is a smoothing: a one pixel line of the drawing survives it',
+    (() => {
+      if (!ink) return false;
+      const sigma = Number(ink.querySelector('feGaussianBlur')?.getAttribute('stdDeviation'));
+      const transfer = ink.querySelector('feFuncA');
+      const slope = Number(transfer?.getAttribute('slope'));
+      const intercept = Number(transfer?.getAttribute('intercept'));
+      const cut = -intercept / slope;                       // where the transfer turns ink on
+      // The peak of a one pixel wide line after a gaussian of sigma [screen px], the
+      // line being two screen pixels wide because of LABEL_MAGNIFY.
+      const erf = x => {                                     // Abramowitz-Stegun 7.1.26
+        const t = 1 / (1 + 0.3275911 * Math.abs(x));
+        const y = 1 - ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
+        return x >= 0 ? y : -y;
+      };
+      const peak = erf(1 / (sigma * Math.SQRT2));
+      return peak > cut + 0.05;
+    })(),
+    'the blurred centre of a line stays above the threshold the transfer turns on at');
   const lettered = names.filter(name => LAYERS[name].contrast === 'white');
   report.check('every drawing that is strokes and points is white ink with a black outline',
     /^brightness\(0\) invert\(1\) url\(#geoportal-labels-ink\)$/.test(filters.white) &&
