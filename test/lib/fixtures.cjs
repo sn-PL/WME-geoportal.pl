@@ -82,33 +82,33 @@ const LAYERS = {
   },
   'Geoportal - OSM': {
     kind: 'tiles', service: SERVICES.osm, category: 'Satellite / Orto',
-    minZ: 0, maxZ: 19, hasOpacity: true, contrast: false, magnify: 1, rank: 1
+    minZ: 0, maxZ: 19, hasOpacity: true, contrast: false, rank: 1
   },
   'Geoportal - adresy': {
     kind: 'grid', service: SERVICES.adresy, category: 'Adresy i Ulice',
     layers: 'A07_Punkty_adresowe', format: 'image/png', minZ: 14, singleTile: false,
-    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, contrast: false
+    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, magnify: 2, contrast: 'white'
   },
   'Geoportal - ulice': {
     kind: 'grid', service: SERVICES.adresy, category: 'Adresy i Ulice',
     layers: 'A08_Ulice_Linie', format: 'image/png', minZ: 14, singleTile: false,
-    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, contrast: false
+    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, magnify: 2, contrast: 'white'
   },
   'Geoportal - place': {
     kind: 'grid', service: SERVICES.adresy, category: 'Adresy i Ulice',
     layers: 'A08_Ulice_Powierzchnie', format: 'image/png', minZ: 14, singleTile: false,
-    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, contrast: false
+    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, magnify: 2, contrast: 'white'
   },
   'Geoportal - adresy, place i ulice w jednym': {
     kind: 'grid', service: SERVICES.adresy, category: 'Adresy i Ulice',
     layers: 'A07_Punkty_adresowe,A08_Ulice_Powierzchnie,A08_Ulice_Linie',
     format: 'image/png', minZ: 14, singleTile: false, ratio: 1.5, crs: 'EPSG:4326',
-    hasOpacity: false, contrast: false
+    hasOpacity: false, magnify: 2, contrast: 'white'
   },
   'Geoportal - przejazdy kolejowe (wymagany duży zoom)': {
     kind: 'grid', service: SERVICES.rail, category: 'Topografia / Inne',
     layers: RAIL_LAYERS, format: 'image/png', minZ: 15, singleTile: false, ratio: 1.5,
-    crs: 'EPSG:2180', hasOpacity: false, contrast: 'dark'
+    crs: 'EPSG:2180', hasOpacity: false, magnify: 2, contrast: 'white'
   },
   'Geoportal - drogi': {
     kind: 'view', service: SERVICES.mileage, category: 'Topografia / Inne',
@@ -119,38 +119,38 @@ const LAYERS = {
   'Geoportal - podział adm': {
     kind: 'grid', service: SERVICES.parcels, category: 'Podział Administracyjny',
     layers: 'dzialki,numery_dzialek', format: 'image/png', minZ: 15, singleTile: false,
-    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, contrast: 'colour'
+    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, magnify: 2, contrast: 'white'
   },
   'Geoportal - Miasta': {
     kind: 'grid', service: SERVICES.border, category: 'Podział Administracyjny',
     layers: 'A06_Granice_obrebow_ewidencyjnych,A05_Granice_jednostek_ewidencyjnych,A04_Granice_miast',
     format: 'image/png', minZ: 12, singleTile: false, ratio: 1.5, crs: 'EPSG:4326',
-    hasOpacity: false, contrast: 'colour'
+    hasOpacity: false, magnify: 2, contrast: 'case'
   },
   'Geoportal - gminy': {
     kind: 'grid', service: SERVICES.border, category: 'Podział Administracyjny',
     layers: 'A03_Granice_gmin', format: 'image/png', minZ: 10, singleTile: false,
-    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, contrast: 'colour'
+    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, magnify: 2, contrast: 'case'
   },
   'Geoportal - powiaty': {
     kind: 'grid', service: SERVICES.border, category: 'Podział Administracyjny',
     layers: 'A02_Granice_powiatow', format: 'image/png', minZ: 10, singleTile: false,
-    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, contrast: 'colour'
+    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, magnify: 2, contrast: 'case'
   },
   'Geoportal - województwa': {
     kind: 'grid', service: SERVICES.border, category: 'Podział Administracyjny',
     layers: 'A01_Granice_wojewodztw', format: 'image/png', minZ: 8, singleTile: false,
-    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, contrast: 'colour'
+    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, magnify: 2, contrast: 'case'
   },
   'Geoportal - Granica PL': {
     kind: 'grid', service: SERVICES.border, category: 'Podział Administracyjny',
     layers: 'A00_Granice_panstwa', format: 'image/png', minZ: 0, singleTile: false,
-    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, contrast: 'colour'
+    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, magnify: 2, contrast: 'case'
   },
   'Geoportal - obiekty topograficzne': {
     kind: 'grid', service: SERVICES.topo, category: 'Topografia / Inne',
     layers: 'bdot', format: 'image/png', minZ: 16, singleTile: false, ratio: 1.5,
-    crs: 'EPSG:2180', hasOpacity: false, contrast: 'dark'
+    crs: 'EPSG:2180', hasOpacity: false, magnify: 2, contrast: 'white'
   }
 };
 

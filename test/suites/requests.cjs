@@ -151,15 +151,17 @@ module.exports = async function requests(report) {
 
   // Sizes: a tile layer asks for cells of the editor's grid, the BDOT switches for
   // the view itself (ratio 1), the road layer for the view plus its margin - and
-  // nothing past the megapixel the composition refuses. Whatever the area, it is
-  // asked for at exactly the pixels the map will draw it with: an image asked for
-  // at fewer of them arrives as the service rasterised it and is then stretched,
-  // which is what softens every letter in it.
+  // nothing past the megapixel the composition refuses. A cell is asked for at
+  // exactly the pixels the map draws it with, except for the drawings whose letters
+  // are the information: those ask for half of them, because the one way to get a
+  // service letter bigger is to have it drawn in an image of half the pixels and
+  // stretched over the place (the filter of the layer then sharpens it).
   for (const name of LAYER_ORDER.filter(name => LAYERS[name].kind === 'grid')) {
     const requests = env.requestsOf(env.layer(name));
     const sizes = [...new Set(requests.map(url => `${params(url).WIDTH}x${params(url).HEIGHT}`))];
-    const want = 256;
-    report.check(`“${name}” asks for 256 px cells of the editor's grid, the size it draws them at`,
+    const magnify = LAYERS[name].magnify ?? 1;
+    const want = 256 / magnify;
+    report.check(`“${name}” asks for cells of the editor's grid, at 1/${magnify} of the pixels of the cell it draws`,
       sizes.length === 1 && sizes[0] === `${want}x${want}`,
       `${requests.length} cells, sizes ${sizes.join(', ')}`);
     const drawn = env.tileAt(env.layer(name), 0, 0)?.getTile()?.style;
@@ -187,23 +189,25 @@ module.exports = async function requests(report) {
       problems.length === 0, problems.join(', ') || `${width}x${height} for ${Math.floor(800 * expected.ratio)}x${Math.floor(600 * expected.ratio)} px of view`);
   }
 
-  // The rule the whole round stands on, checked on every overlay at once: what a
-  // service is asked for is what the map draws. A cell of the grid is 256 px on
-  // the map and a view image covers its own place at one pixel per pixel, so an
-  // image that comes back at the size it was asked for is drawn with no scale at
-  // all - the letters are the ones the service rasterised, sharp.
+  // The size rule of the whole round, checked on every overlay at once: what a
+  // service is asked for is what the map draws, pixel for pixel - and the drawings
+  // whose letters are the information are the one exception, and by exactly the
+  // factor their letters are made bigger with.
   const scaled = [];
   for (const name of LAYER_ORDER.filter(name => LAYERS[name].kind !== 'tiles')) {
     const tile = env.tileAt(env.layer(name), 0, 0);
     const asked = params(tile?.imgDiv?.src || '');
     const drawn = parseFloat(tile?.imgDiv?.style?.width || '');
+    const magnify = LAYERS[name].magnify ?? 1;
     if (!asked.WIDTH || !drawn) continue;
-    if (Number(asked.WIDTH) !== drawn || Number(asked.HEIGHT) !== parseFloat(tile.imgDiv.style.height)) {
-      scaled.push(`${name.replace('Geoportal - ', '')}: asked ${asked.WIDTH}x${asked.HEIGHT}, drawn ${drawn}x${parseFloat(tile.imgDiv.style.height)}`);
+    if (Number(asked.WIDTH) * magnify !== drawn ||
+        Number(asked.HEIGHT) * magnify !== parseFloat(tile.imgDiv.style.height)) {
+      scaled.push(`${name.replace('Geoportal - ', '')}: asked ${asked.WIDTH}x${asked.HEIGHT}, drawn ` +
+        `${drawn}x${parseFloat(tile.imgDiv.style.height)} (x${magnify})`);
     }
   }
-  report.check('every overlay is asked for at exactly the size the map draws it at, pixel for pixel',
-    scaled.length === 0, scaled.join(' | ') || `${LAYER_ORDER.length} layers, no stretched image among them`);
+  report.check('every overlay is asked for at the size the map draws it, pixel for pixel or one half of it',
+    scaled.length === 0, scaled.join(' | ') || `${LAYER_ORDER.length} layers, no other stretched image among them`);
 
   const railRequests = env.requestsOf(env.layer('Geoportal - przejazdy kolejowe (wymagany duży zoom)'));
   const crossing = REFERENCE_POINTS.imbramowice;

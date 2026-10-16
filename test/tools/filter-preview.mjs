@@ -1,18 +1,21 @@
 #!/usr/bin/env node
 /**
- * Write a page that shows the real Geoportal drawings three times: as the service
- * draws them at the size the script asks for now, as the previous version showed
- * them (the same area asked for at half the pixels and stretched back over it, under
- * the wide white halo of 1.6.0) and as the script shows them now (the drawing at its
- * own size, under the hairline edge) - so the two treatments can be judged side by
- * side in a browser instead of on the map, and the numbers of the new one tuned.
+ * Write a page that shows the real Geoportal drawings three times, over the real
+ * ortho photo, in one box of the same size each:
+ *
+ *   - as the service draws the cell at its own size (no filter) - the reference,
+ *   - as the previous version showed it (the drawing of 1:1 under the wide white
+ *     halo of the rounds up to 22, which is what the reports are about),
+ *   - as the script shows it now (the image of half the pixels, which makes the
+ *     service draw its letters twice as big, stretched back and put through the
+ *     filters that snap every edge onto the pixel grid).
+ *
+ * The drawings are loaded straight from the Geoportal, for the address the script's
+ * own request has, and both treatments use the script's own filter strings, so what
+ * the page shows is what the map shows - only without the editor around it.
  *
  *   node test/tools/filter-preview.mjs            # writes test/.cache/filter-preview.html
- *   node test/tools/filter-preview.mjs --serve    # ...and serves test/.cache on :8012
- *
- * The page needs the internet: it loads each drawing straight from the Geoportal,
- * for the address the layer's own request has (the cell of the view centre for the
- * tile layers, the whole view for a single-tile layer).
+ *   node test/tools/filter-preview.mjs --serve    # ...and serves it on :8012
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -27,7 +30,8 @@ const require = createRequire(import.meta.url);
 const { boot, params, plain } = require(path.join(TEST_DIR, 'lib', 'harness.cjs'));
 const { LAYERS } = require(path.join(TEST_DIR, 'lib', 'fixtures.cjs'));
 
-/** The layers worth looking at: every filtered one, plus one unfiltered for control. */
+/** The layers worth looking at: every layer whose letters are re-drawn, plus the
+ *  two that keep their own colour, for comparison. */
 const SHOW = [
   'Geoportal - podział adm',
   'Geoportal - Miasta',
@@ -35,11 +39,13 @@ const SHOW = [
   'Geoportal - powiaty',
   'Geoportal - województwa',
   'Geoportal - Granica PL',
-  'Geoportal - drogi',
-  'Geoportal - przejazdy kolejowe (wymagany duży zoom)',
   'Geoportal - obiekty topograficzne',
-  'BDOT - Numer drogi',
-  'Geoportal - adresy'
+  'Geoportal - adresy',
+  'Geoportal - ulice',
+  'Geoportal - place',
+  'Geoportal - przejazdy kolejowe (wymagany duży zoom)',
+  'Geoportal - drogi',
+  'BDOT - Numer drogi'
 ];
 
 // The place of the report: Imbramowice, the coordinates shown in its screenshots.
@@ -52,29 +58,12 @@ await env.drawAll();
 // The photo of every cell of the view, by grid position, so each overlay can be
 // shown over the imagery the editor would have under it.
 const ortos = {};
-const ortoCells = [];
 const orto = env.layer('Geoportal - ortofoto');
 if (orto) {
   orto.grid.forEach((line, row) => line.forEach((tile, column) => {
     const cell = plain(tile.imgDiv?.src || '');
-    if (!cell) return;
-    ortos[`${row},${column}`] = cell;
-    ortoCells.push({ row, column, url: cell });
+    if (cell) ortos[`${row},${column}`] = cell;
   }));
-}
-// The same photo, as a grid of cells of the view: a single-image layer covers the
-// whole view, so its background is the whole grid, not one cell.
-const ortoGrid = orto ? { rows: orto.grid.length, columns: orto.grid[0].length, cells: ortoCells } : null;
-
-/** The photo under an overlay: one cell of the view for a layer of cells, the grid
- *  of the view for a layer that is one image. */
-function under(row, className) {
-  if (row.grid) {
-    return `<div class="bg-grid" style="grid-template-columns:repeat(${row.grid.columns},1fr);` +
-      `grid-template-rows:repeat(${row.grid.rows},1fr)">` +
-      row.grid.cells.map(cell => `<img src="${cell.url}" alt="" loading="lazy">`).join('') + '</div>';
-  }
-  return `<div class="${className}"${row.bg ? ` style="background-image:url('${row.bg}')"` : ''}></div>`;
 }
 
 /** The same address with another image size. */
@@ -102,145 +91,105 @@ for (const name of SHOW) {
   }
   if (!url) continue;
   const query = params(url);
-  // The address of the same area with half the pixels: that is what 1.6.0 asked for
-  // on the layers whose text it wanted bigger, and what the browser then stretched
-  // over the same place. The service draws its labels at a size fixed in pixels, so
-  // halving the pixels doubles them - at the cost of the edges of every letter.
-  const half = withSize(url, Number(query.WIDTH) / 2, Number(query.HEIGHT) / 2);
+  // The same cell with the pixels the map draws it with: that is the drawing of the
+  // previous rounds, at one pixel per pixel.
+  const full = withSize(url, Number(query.WIDTH) * 2, Number(query.HEIGHT) * 2);
   rows.push({
     name: name.replace('Geoportal - ', ''),
     kind,
     url,
-    half,
-    grid: layer.singleTile ? ortoGrid : null,
-    // The photo under the overlay: the grid of the view for a one-image layer, the
-    // cell of the same place for a layer of cells (the overlays are transparent, so
-    // this is what the editor draws underneath them).
+    full,
     bg: layer.singleTile ? '' : ortos[`${row},${column}`] || '',
     detail: `${query.CRS || ''} ${query.WIDTH || ''}x${query.HEIGHT || ''}`.trim()
   });
 }
 
-// The numbers the script ships, so the page opens on them and not on a copy.
+// The numbers and the filter elements the script ships, so the page opens on them.
 const filter = env.internals.CONTRAST_FILTER;
-const brightness = (filter.colour.match(/brightness\(([\d.]+)\)/) || [])[1] || '2.2';
-const brightnessDark = (filter.dark.match(/brightness\(([\d.]+)\)/) || [])[1] || '2';
-const saturate = (filter.colour.match(/saturate\(([\d.]+)\)/) || [])[1] || '1.7';
-const edge = (filter.colour.match(/drop-shadow\(0 0 ([\d.]+)px/) || [])[1] || '1';
-
-// The layers are asked while zooming, so the cells of one view are of one place.
+const svg = env.internals.CONTRAST_SVG;
 const centre = env.map.getCenter();
 env.close();
 
+const box = 320;
 const html = `<!doctype html>
 <html lang="pl"><head><meta charset="utf-8">
-<title>Geoportal WME - podglad czytelnosci warstw</title>
+<title>Geoportal WME - podglad podpisow</title>
 <style>
-  :root { --brightness: 2.2; --brightness-dark: 2; --saturate: 1.7; --edge: 1px;
-          --old-b: 2.4; --old-s: 1.8; --shadow: #fff; }   /* the old numbers, fixed */
   body { margin: 0; padding: 24px 28px 60px; background: #10141a; color: #e8eef6;
          font: 14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-  h1 { font-size: 20px; margin: 0 0 4px; }
-  p.lead { margin: 0 0 18px; color: #9fb0c4; max-width: 96ch; }
+  h1 { font-size: 20px; margin: 0 0 6px; }
+  p.lead { margin: 0 0 16px; color: #9fb0c4; max-width: 100ch; }
+  code { color: #7fd1ff; }
   fieldset { border: 1px solid #263245; border-radius: 8px; padding: 12px 16px; margin: 0 0 22px; }
   legend { color: #9fb0c4; padding: 0 6px; }
   label { display: inline-block; margin-right: 18px; white-space: nowrap; }
-  input[type=range] { vertical-align: middle; width: 140px; }
-  code { color: #7fd1ff; }
+  input[type=range] { vertical-align: middle; width: 160px; }
   .row { border-top: 1px solid #1e2735; padding: 14px 0; }
   .row h2 { font-size: 15px; margin: 0 0 8px; font-weight: 600; }
   .row h2 small { color: #7f8ea3; font-weight: 400; margin-left: 8px; }
   .pair { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-start; }
   figure { margin: 0; }
-  figcaption { color: #7f8ea3; font-size: 12px; margin-bottom: 4px; min-height: 32px; }
-  .shot { background: #1b2430; border: 1px solid #263245; border-radius: 6px; overflow: hidden;
-          width: 300px; }
-  .shot img { display: block; width: 300px; height: auto; }
-  /* The treatment of 1.6.0 before this round: three white halos, up to 2.6 px wide,
-     under a drawing whose ink was lifted harder. */
-  .old-f img { filter: brightness(var(--old-b)) saturate(var(--old-s)) contrast(1.1)
-                       drop-shadow(0 0 0.8px #fff) drop-shadow(0 0 1.6px #fff)
-                       drop-shadow(0 0 2.6px #fff); }
-  /* What the script does now: the ink lifted, the colour raised, and a hairline of
-     white under it - nothing else. */
-  .new-f img { filter: brightness(var(--brightness)) saturate(var(--saturate))
-                       drop-shadow(0 0 var(--edge) #fff) drop-shadow(0 0 var(--edge) #fff); }
-  .new-f.dark img { filter: brightness(var(--brightness-dark))
-                            drop-shadow(0 0 var(--edge) #fff) drop-shadow(0 0 var(--edge) #fff); }
-  .stage { position: relative; width: 300px; }
-  .bg-grid { position: absolute; inset: 0; display: grid; }
-  .bg-grid img { width: 100%; height: 100%; display: block; }
-  .stage .under { position: absolute; inset: 0; background-color: #1b2430;
-                  background-position: center; background-size: 100% 100%; }
-  .stage .over { position: relative; }
-  .sat { background: #2a2a24; }
-  .shot.has-bg, .stage.has-bg { border-color: #3a4658; }
-  .shot.has-bg { background-image: var(--bg); background-size: 100% 100%; }
-  .note { color: #7f8ea3; font-size: 12px; margin-top: 6px; }
-  a { color: #7fd1ff; }
-</style></head>
+  figcaption { color: #7f8ea3; font-size: 12px; margin-bottom: 4px; min-height: 34px; }
+  .stage { position: relative; width: ${box}px; height: ${box}px; background: #1b2430;
+           border: 1px solid #263245; border-radius: 6px; overflow: hidden; }
+  .stage .under { position: absolute; inset: 0; background-position: center;
+                  background-size: 100% 100%; }
+  .stage .over { position: absolute; inset: 0; width: 100%; height: 100%; }
+  /* What every version up to round 22 did to these layers: a white halo two pixels
+     wide around the drawing, which at the size of a service letter is the letter. */
+  .prev .over { filter: ${filter.colour}; }
+  /* What the script does now: the image of half the pixels, which the service drew
+     twice as large, stretched back over the cell and put through the filter of the
+     layer's own kind - the letters white, every edge snapped onto the pixel grid. */
+  .now :is(.over) { }
+</style>
+${svg}
+</head>
 <body>
-<h1>Geoportal WME &mdash; podgl&#261;d czytelno&#347;ci warstw</h1>
+<h1>Geoportal WME &mdash; podgl&#261;d podpis&oacute;w</h1>
 <p class="lead">
-  Ka&#380;da warstwa jest pokazana trzy razy: <b>tak rysuje us&#322;uga</b> (obraz w takim rozmiarze,
-  o jaki prosi skrypt &mdash; bez filtra), <b>tak wygl&#261;da&#322;a w poprzedniej wersji</b> (ten sam obszar
-  w po&#322;owie pikseli, rozci&#261;gni&#281;ty z powrotem na to samo miejsce pod potr&oacute;jn&#261; bia&#322;&#261;
-  po&#347;wiat&#261;) i <b>tak wygl&#261;da teraz</b> (obraz w swoim rozmiarze pod cienk&#261; bia&#322;&#261;
-  obw&oacute;dk&#261;). Trzecia kolumna s&#322;ucha suwak&oacute;w poni&#380;ej.
-  Miejsce: Imbramowice na Dolnym &#346;l&#261;sku, ${centre.lat.toFixed(5)}, ${centre.lon.toFixed(5)}.
+  Trzy razy ten sam kawa&#322;ek mapy, w ramkach tej samej wielko&#347;ci:
+  <b>tak rysuje us&#322;uga</b> (kom&oacute;rka 256 px, bez filtra),
+  <b>tak by&#322;o do tej pory</b> (ten sam obraz 1:1 pod bia&#322;&#261; po&#347;wiat&#261;
+  <code>${filter.colour}</code>) i
+  <b>tak jest teraz</b> (obraz w po&#322;owie pikseli, rozci&#261;gni&#281;ty na to samo miejsce,
+  pod filtrem, kt&oacute;ry robi z niego bia&#322;e litery z tward&#261; kraw&#281;dzi&#261;).
+  Miejsce: Imbramowice, ${centre.lat.toFixed(5)}, ${centre.lon.toFixed(5)}.
 </p>
-<fieldset><legend>Filtr warstw cienkich (na &#380;ywo)</legend>
-  <label>jasno&#347;&#263; kolor&oacute;w <code>brightness()</code>
-    <input id="b" type="range" min="1" max="3" step="0.05" value="${brightness}"></label>
-  <label>jasno&#347;&#263; czarnych linii
-    <input id="bd" type="range" min="1" max="3" step="0.05" value="${brightnessDark}"></label>
-  <label>kolor <code>saturate()</code>
-    <input id="s" type="range" min="1" max="3" step="0.05" value="${saturate}"></label>
-  <label>obw&oacute;dka <code>drop-shadow</code> (px)
-    <input id="e" type="range" min="0" max="3" step="0.25" value="${edge}"></label>
-<div>W skrypcie teraz: <code id="css">brightness(2.2) saturate(1.7) drop-shadow(0 0 1px #fff) &times;2</code></div>
-  <div class="note">Kolumna &#347;rodkowa trzyma liczby poprzedniej wersji (1.6.0 przed t&#261; zmian&#261;):
-    jasno&#347;&#263; 2.4 / 2.1, <code>saturate(1.8)</code>, <code>contrast(1.1)</code> i trzy bia&#322;e
-    po&#347;wiaty 0.8 / 1.6 / 2.6 px &mdash; oraz obraz w po&#322;owie pikseli, rozci&#261;gni&#281;ty przez
-    przegl&#261;dark&#281;. To w&#322;a&#347;nie te liczby i to rozci&#261;gni&#281;cie dawa&#322;y
-    &bdquo;powi&#281;kszone, ale nie czystsze&rdquo; napisy.</div>
+<fieldset><legend>Podgl&#261;d</legend>
+  <label>powi&#281;kszenie ramki <input id="z" type="range" min="1" max="3" step="1" value="2">
+    <code id="zx">2&times;</code></label>
+  <div class="note">Filtry s&#261; te same, kt&oacute;rych u&#380;ywa skrypt: <code>white</code>
+    i <code>case</code> to filtry SVG z tej strony, <code>dark</code> i <code>colour</code>
+    (warstwy kolorowe: drogi, BDOT) bez zmian od rundy 20.</div>
 </fieldset>
 ${rows.map(row => `<div class="row">
-  <h2>${row.name}<small>${row.kind ? `filtr: ${row.kind}` : 'bez filtra (por&#243;wnanie)'} &middot; ${row.detail}</small></h2>
+  <h2>${row.name}<small>${row.kind ? `filtr: ${row.kind}` : 'bez filtra'} &middot; ${row.detail}</small></h2>
   <div class="pair">
-    <figure><figcaption>tak rysuje us&#322;uga &mdash; obraz w rozmiarze, o jaki prosi skrypt</figcaption>
-      <div class="shot sat${row.bg ? ' has-bg' : ''}"${row.bg ? ` style="--bg:url('${row.bg}')"` : ''}>
-        ${row.grid ? `<div class="stage">${under(row, 'under')}<img class="over" src="${row.url}" alt="${row.name}" loading="lazy"></div>`
-          : `<img src="${row.url}" alt="${row.name}" loading="lazy">`}</div></figure>
-    ${row.kind ? `<figure class="old-f"><figcaption>poprzednio &mdash; po&#322;owa pikseli rozci&#261;gni&#281;ta, potr&oacute;jna po&#347;wiata</figcaption>
-      <div class="stage sat${row.bg ? ' has-bg' : ''}"${row.bg ? ` style="--bg:url('${row.bg}')"` : ''}>
-        ${under(row, 'under')}
-        <img class="over" src="${row.half}" alt="${row.name} jak w poprzedniej wersji" loading="lazy"></div>
-      </figure>
-      <figure class="new-f${row.kind === 'dark' ? ' dark' : ''}"><figcaption>teraz &mdash; obraz 1:1 pod cienk&#261; bia&#322;&#261; obw&oacute;dk&#261;</figcaption>
-      <div class="stage sat${row.bg ? ' has-bg' : ''}"${row.bg ? ` style="--bg:url('${row.bg}')"` : ''}>
-        ${under(row, 'under')}
-        <img class="over" src="${row.url}" alt="${row.name} jak w skrypcie" loading="lazy"></div>
-      </figure>` : ''}
+    <figure><figcaption>tak rysuje us&#322;uga &mdash; 256 px, bez filtra</figcaption>
+      <div class="stage"${row.bg ? ` style="background-image:url('${row.bg}')"` : ''}>
+        <img class="over" src="${row.full}" alt="${row.name}" loading="lazy"></div></figure>
+    <figure class="prev"><figcaption>do tej pory &mdash; 1:1 pod po&#347;wiat&#261;</figcaption>
+      <div class="stage"${row.bg ? ` style="background-image:url('${row.bg}')"` : ''}>
+        <img class="over" src="${row.full}" alt="${row.name} jak do tej pory" loading="lazy"></div></figure>
+    <figure class="now"><figcaption>teraz &mdash; po&#322;owa pikseli, bia&#322;e litery, twarda kraw&#281;d&#378;</figcaption>
+      <div class="stage"${row.bg ? ` style="background-image:url('${row.bg}')"` : ''}>
+        <img class="over" src="${row.url}" alt="${row.name} jak teraz" loading="lazy"
+             style="filter:${row.kind ? filter[row.kind] : 'none'}"></div></figure>
   </div>
 </div>`).join('\n')}
 <script>
-  const root = document.documentElement;
-  // The numbers the script ships, so the page opens on them.
-  const shipped = { b: ${brightness}, bd: ${brightnessDark}, s: ${saturate}, e: ${edge} };
+  const zoom = document.getElementById('z');
   const sync = () => {
-    root.style.setProperty('--brightness', document.getElementById('b').value);
-    root.style.setProperty('--brightness-dark', document.getElementById('bd').value);
-    root.style.setProperty('--saturate', document.getElementById('s').value);
-    root.style.setProperty('--edge', document.getElementById('e').value + 'px');
-    const value = (id) => document.getElementById(id).value;
-    document.getElementById('css').textContent =
-      'dark: brightness(' + value('bd') + ') + ' + value('e') + ' px edge  |  ' +
-      'colour: brightness(' + value('b') + ') saturate(' + value('s') + ') + ' + value('e') + ' px edge';
+    const scale = Number(zoom.value);
+    document.getElementById('zx').textContent = scale + '\\u00d7';
+    document.querySelectorAll('.stage').forEach(stage => {
+      stage.style.width = (${box} * scale) + 'px';
+      stage.style.height = (${box} * scale) + 'px';
+    });
   };
-  ['b', 'bd', 's', 'e'].forEach(id => document.getElementById(id).addEventListener('input', sync));
+  zoom.addEventListener('input', sync);
   sync();
-</script>
 </script>
 </body></html>
 `;
@@ -248,7 +197,7 @@ ${rows.map(row => `<div class="row">
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
 fs.writeFileSync(OUT, html);
 console.log(`[preview] ${path.relative(process.cwd(), OUT)}: ${rows.length} layers ` +
-  `(${rows.filter(row => row.kind).length} with a filter)`);
+  `(${rows.filter(row => row.kind).length} of them with a filter)`);
 
 if (process.argv.includes('--serve')) {
   const port = Number(process.argv.find(arg => arg.startsWith('--port='))?.split('=')[1] || 8012);
