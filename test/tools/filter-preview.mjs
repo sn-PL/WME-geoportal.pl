@@ -4,6 +4,9 @@
  * ortho photo, in one box of the same size each:
  *
  *   - as the service draws the cell at its own size (no filter) - the reference,
+ *     (since round 25 a cell of those layers is 1024 px and the image asked for is
+ *     512 px, so a window is built from a few images instead of dozens - the letter
+ *     treatment itself is unchanged),
  *   - as the previous version showed it (the drawing of 1:1 under the wide white
  *     halo of the rounds up to 22, which is what the reports are about),
  *   - as the script shows it now (the image of half the pixels, which makes the
@@ -155,7 +158,7 @@ ${svg}
 <h1>Geoportal WME &mdash; podgl&#261;d podpis&oacute;w</h1>
 <p class="lead">
   Trzy razy ten sam kawa&#322;ek mapy, w ramkach tej samej wielko&#347;ci:
-  <b>tak rysuje us&#322;uga</b> (kom&oacute;rka 256 px, bez filtra),
+  <b>tak rysuje us&#322;uga</b> (obraz 1:1, bez filtra),
   <b>tak pokaza&#322;a to runda 23</b> (pr&#243;g krycia na ca&#322;ym rysunku &mdash; z bladego
   napisu i w&#322;asnej bia&#322;ej otoczki us&#322;ugi robi&#322; si&#281; jeden jasny plac) i
   <b>tak jest teraz</b> (obraz w po&#322;owie pikseli, rozci&#261;gni&#281;ty na to samo miejsce,
@@ -168,12 +171,15 @@ ${svg}
   <div class="note">Trzecia kolumna u&#380;ywa filtr&oacute;w, kt&oacute;re skrypt ma teraz:
     <code>white</code> (kreski i punkty: bia&#322;y atrament + czarna obw&oacute;dka),
     <code>outline</code> (warstwy granic: <b>rysunek us&#322;ugi bez zmian</b> + ta sama czarna
-    obw&oacute;dka), <code>dark</code> i <code>colour</code> (drogi, BDOT) bez zmian od rundy 20.</div>
+    obw&oacute;dka), <code>dark</code> i <code>colour</code> (drogi, BDOT) bez zmian od rundy 20.
+    Od rundy 25 kom&oacute;rka tych warstw ma 1024 px, a obraz 512 px (by&#322;o 256/128) &mdash;
+    liter to nie zmienia, a okno mapy sk&#322;ada si&#281; z kilku obrazk&oacute;w zamiast
+    kilkudziesi&#281;ciu, wi&#281;c us&#322;uga rysuje mniej kopii tych samych podpis&oacute;w.</div>
 </fieldset>
 ${rows.map(row => `<div class="row">
   <h2>${row.name}<small>${row.kind ? `filtr: ${row.kind}` : 'bez filtra'} &middot; ${row.detail}</small></h2>
   <div class="pair">
-    <figure><figcaption>tak rysuje us&#322;uga &mdash; 256 px, bez filtra</figcaption>
+    <figure><figcaption>tak rysuje us&#322;uga &mdash; obraz 1:1, bez filtra</figcaption>
       <div class="stage"${row.bg ? ` style="background-image:url('${row.bg}')"` : ''}>
         <img class="over" src="${row.full}" alt="${row.name}" loading="lazy"></div></figure>
     <figure class="prev"><figcaption>runda 23 &mdash; pr&#243;g na ca&#322;ym rysunku (zbity plac)</figcaption>

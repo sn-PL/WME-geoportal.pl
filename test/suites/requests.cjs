@@ -155,19 +155,42 @@ module.exports = async function requests(report) {
   // exactly the pixels the map draws it with, except for the drawings whose letters
   // are the information: those ask for half of them, because the one way to get a
   // service letter bigger is to have it drawn in an image of half the pixels and
-  // stretched over the place (the filter of the layer then sharpens it).
+  // stretched over the place (the filter of the layer then sharpens it) - and those
+  // same layers are drawn in cells of the map twice the editor's own (round 25):
+  // one service rendering covers four times the ground, so a view is made of a
+  // quarter of the images, every one of which the service puts its own copy of
+  // every name into.
   for (const name of LAYER_ORDER.filter(name => LAYERS[name].kind === 'grid')) {
     const requests = env.requestsOf(env.layer(name));
     const sizes = [...new Set(requests.map(url => `${params(url).WIDTH}x${params(url).HEIGHT}`))];
     const magnify = LAYERS[name].magnify ?? 1;
-    const want = 256 / magnify;
-    report.check(`“${name}” asks for cells of the editor's grid, at 1/${magnify} of the pixels of the cell it draws`,
+    const cell = LAYERS[name].cell ?? 256;
+    const want = cell / magnify;
+    report.check(`“${name}” asks for cells of ${cell} px of map, at 1/${magnify} of the pixels of the cell it draws`,
       sizes.length === 1 && sizes[0] === `${want}x${want}`,
       `${requests.length} cells, sizes ${sizes.join(', ')}`);
     const drawn = env.tileAt(env.layer(name), 0, 0)?.getTile()?.style;
-    report.check(`“${name}” is drawn in its own 256 px cell of the map`,
-      !drawn || drawn.width === '256px' || drawn.width === '512px',
+    report.check(`“${name}” is drawn in its own ${cell} px cell of the map`,
+      !drawn || drawn.width === `${cell}px`,
       drawn ? `cell ${drawn.width} x ${drawn.height}` : 'no cell measured');
+  }
+
+  // Round 25: the images a view is made of, counted. This is what the repeated
+  // numbers of the reports are - a service renders every name of the ground an image
+  // covers into that image, so the number of images over a view is the number of
+  // chances for one number to be drawn twice - and this is the number that fell.
+  const gridSize = { w: 800, h: 600 };
+  const cellsOver = cell => (Math.ceil(gridSize.w / cell) + 1) * (Math.ceil(gridSize.h / cell) + 1);
+  for (const name of ['Geoportal - podział adm', 'Geoportal - Miasta', 'Geoportal - adresy']) {
+    const layer = env.layer(name);
+    const asked = params(env.requestOf(layer));
+    const image = env.tileAt(layer, 0, 0)?.imgDiv;
+    const cell = image ? parseFloat(image.style.width) : 0;
+    const images = layer.grid.reduce((sum, row) => sum + row.filter(Boolean).length, 0);
+    report.check(`“${name}” draws an 800x600 view out of far fewer images than the editor's own cells`,
+      cell === LAYERS[name].cell && images <= cellsOver(cell) && images * 2 <= cellsOver(256),
+      `${images} images of ${cell} px (asked for ${asked.WIDTH}x${asked.HEIGHT}), against ` +
+      `${cellsOver(256)} images of 256 px, ${cellsOver(cell)} if all of them covered the view`);
   }
 
   const oneImage = ['Geoportal - drogi',
