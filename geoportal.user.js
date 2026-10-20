@@ -463,8 +463,10 @@
 
     constructor(OL, map) {
       this.OL = OL;
+      // The editor's map object. In practice it is the OpenLayers map itself -
+      // `layer.map` set by addLayer confirms it and only then do we read its
+      // resolution and hook its events (see attachMapEvents).
       this.map = map;
-      this.olMap = null; // OpenLayers map holding our layers, known after the first one is added.
       this.mapHandlers = null; // callbacks to run on the map's own events
       this.watching = false; // the map's events are hooked
       this.recoveries = []; // image-recovery resets, one per WMS layer
@@ -482,7 +484,7 @@
 
     getMapResolution() {
       try {
-        const resolution = this.olMap?.getResolution?.();
+        const resolution = this.map.getResolution?.();
         return Number.isFinite(resolution) && resolution > 0 ? resolution : null;
       } catch (error) {
         return null;
@@ -671,14 +673,16 @@
           });
       }
       layer.setOpacity(opacity);
-      // Once the OpenLayers map is known - from the first layer the SDK put on
-      // it - every layer goes straight onto it; before that, through the SDK's
-      // own map, which is what tells us which OpenLayers map it is.
-      const target = this.olMap ?? this.map;
-      target.addLayer(layer);
-      if (!this.olMap && layer.map) {
-        this.olMap = layer.map;
+      this.map.addLayer(layer);
+      // addLayer tells us the OpenLayers map it drew onto. Only when that is a
+      // map of its own - an SDK wrapper that hides it - do we re-attach there;
+      // normally `layer.map` is the very object we added through, so nothing
+      // happens and no layer is ever attached twice.
+      if (layer.map && layer.map !== this.map) {
+        this.map = layer.map;
         if (this.zoomResolution === null) this.zoomResolution = this.getMapResolution();
+        this.attachMapEvents();
+      } else if (!this.watching) {
         this.attachMapEvents();
       }
       const filter = CONTRAST_FILTER[options.contrast];
@@ -763,8 +767,8 @@
     }
 
     /**
-     * Watch the map itself. Remembered until the map is known, i.e. until the
-     * first WMS layer is attached to it.
+     * Watch the map itself. Remembered until a layer confirms the map it was
+     * drawn onto (see createLayer), because only that map dispatches the events.
      * @param {{ onZoom: () => void, onLayers: () => void }} handlers
      */
     watchMap(handlers) {
@@ -780,7 +784,7 @@
      */
     attachMapEvents() {
       if (this.watching) return;
-      const events = this.olMap?.events;
+      const events = this.map.events;
       const { onZoom, onLayers } = this.mapHandlers ?? {};
       if (typeof events?.on !== 'function' ||
           typeof onZoom !== 'function' || typeof onLayers !== 'function') return;
