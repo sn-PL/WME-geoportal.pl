@@ -102,11 +102,14 @@ for (const name of SHOW) {
   // chain without the smoothing of round 26 - that is the stepped contour of the
   // report. For the layers whose ink is left alone (the boundaries, the roads, the
   // BDOT surfaces) nothing changed in this round, and the column says so.
+  // For the boundary layers the previous look was the plain drawing with a black
+  // casing; for the re-drawn ink it was the same chain without the smoothing of
+  // round 26 - that is the stepped contour of the report.
   const previous = kind === 'white'
     ? { css: 'brightness(0) invert(1) url(#geoportal-previous)', caption: 'poprzednio &mdash; s&#322;absze wyg&#322;adzanie (0,8 px)' }
-    : { css: filters[kind] || 'none', caption: kind === 'outline'
-        ? 'bez zmian od rundy 24 &mdash; rysunek us&#322;ugi + obw&oacute;dka'
-        : 'bez zmian od rundy 20 &mdash; rozja&#347;nienie i bia&#322;a kraw&#281;d&#378;' };
+    : kind === 'outline'
+      ? { css: 'drop-shadow(0 0 1px #000) drop-shadow(0 0 1px #000)', caption: 'poprzednio &mdash; blade litery us&#322;ugi z czarnym obwodem' }
+      : { css: filters[kind] || 'none', caption: 'bez zmian od rundy 20 &mdash; rozja&#347;nienie i bia&#322;a kraw&#281;d&#378;' };
   rows.push({
     name: name.replace('Geoportal - ', ''),
     kind,
@@ -187,8 +190,10 @@ ${svg}
     <code id="zx">2&times;</code></label>
   <div class="note">Trzecia kolumna u&#380;ywa filtr&oacute;w, kt&oacute;re skrypt ma teraz:
     <code>white</code> (kreski i punkty: bia&#322;y atrament + czarna obw&oacute;dka),
-    <code>outline</code> (warstwy granic: <b>rysunek us&#322;ugi bez zmian</b> + ta sama czarna
-    obw&oacute;dka), <code>dark</code> i <code>colour</code> (drogi, BDOT) bez zmian od rundy 20.
+    <code>outline</code> (warstwy granic: pola i linie bez zmian, a nazwy podniesione do
+    bia&#322;ego atramentu z czarną obw&oacute;dką &mdash; blade litery
+    us&#322;ugi ginę&#322;y na tle zdjęć lotniczych), <code>dark</code>
+    i <code>colour</code> (drogi, BDOT) bez zmian od rundy 20.
     Od rundy 25 kom&oacute;rka tych warstw ma 1024 px, a obraz 512 px (by&#322;o 256/128) &mdash;
     liter to nie zmienia, a okno mapy sk&#322;ada si&#281; z kilku obrazk&oacute;w zamiast
     kilkudziesi&#281;ciu, wi&#281;c us&#322;uga rysuje mniej kopii tych samych podpis&oacute;w.

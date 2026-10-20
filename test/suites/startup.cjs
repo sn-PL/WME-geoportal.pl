@@ -25,10 +25,10 @@ module.exports = async function startup(report) {
     subscribed.join(', '));
 
   report.check('the script also hooks the map\'s own events, for a renamed SDK event',
-    env.integration.wms.watching === true && env.integration.wms.olMap === env.map,
+    env.integration.wms.watching === true && env.integration.wms.map === env.map,
     `watching=${env.integration.wms.watching}`);
-  const mapEvents = Object.keys(env.integration.wms.olMap.events.listeners)
-    .filter(name => (env.integration.wms.olMap.events.listeners[name] || []).length > 0);
+  const mapEvents = Object.keys(env.map.events.listeners)
+    .filter(name => (env.map.events.listeners[name] || []).length > 0);
   report.check('the map events it hooks are the ones that renumber and re-zoom',
     ['movestart', 'moveend', 'addlayer', 'removelayer', 'changelayer'].every(name => mapEvents.includes(name)),
     mapEvents.join(', '));
