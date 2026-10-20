@@ -513,150 +513,180 @@
       return { w: Math.floor(size.w * shrink), h: Math.floor(size.h * shrink) };
     }
 
+    /**
+     * Build a layer of the definition and put it on the map. Both kinds - a WMS
+     * image of the view and the editor's own z/x/y tiles (the standard ortho as
+     * Web Mercator tiles that line up with the map's grid, so a refused tile is
+     * one hole with the base map behind it instead of an empty view) - differ
+     * only in how the layer object is made and which URL its cells ask for;
+     * everything around that is the same here.
+     * @param {{ name: string, url: string, layers?: string, format?: string, kind?: string, options: any }} definition
+     * @param {number} opacity
+     */
     createLayer(definition, opacity) {
-      if (definition.kind === "wmts") return this.createTileLayer(definition, opacity);
-      const { name, url, layers, format, options } = definition;
+      const { name, url, options } = definition;
       const adapter = this;
       const minZoom = options.minZ ?? 0;
-      const singleTile = options.singleTile ?? true;
-      // The system of the request. Everything the map itself can speak is asked
-      // for in EPSG:4326; the topographic objects need the system of the county
-      // services behind their integration (see to2180).
-      const crs = options.crs ?? "EPSG:4326";
       // State of this layer's image recovery, shared with retryMissingImage.
-      const recovery = WmsAdapter.newRecovery();
-      // The photo layers are opaque mosaics: transparency is a contradiction there
-      // and OpenLayers answered it by switching their JPEG to PNG. Only the PNG
-      // overlays ask for it, so the requests stay as they were before 1.5.0.
-      // Ask for the service's own errors as documents, not as pictures. Asked the
-      // WMS way (INIMAGE, which is what OpenLayers asks for by default) a failing
-      // service paints its error into the image and that picture lands on the map:
-      // the grey plate with "Invalid CRS given" or "Error HRESULT E_FAIL has been
-      // returned from a call to a COM component." A document is not an image, so
-      // the cell stays a hole - as if the tile were never delivered - and the
-      // recovery below asks again.
-      /** @type {Record<string, string>} */
-      const params = { layers, format, version: "1.3.0", exceptions: "XML" };
-      if (format !== "image/jpeg") params.transparent = "true";
-      const layer = new this.OL.Layer.WMS(name, url, params,
-        {
-          isBaseLayer: false, visibility: false,
-          singleTile,
-          // The cell of the map this layer is drawn in. The editor's own cells are
-          // 256 px (the value OpenLayers falls back to); the drawings whose letters
-          // are the information ask for half a kilometre of map per cell instead
-          // (LABEL_CELL), so a view is made of a quarter of the images - see above.
-          tileSize: new adapter.OL.Size(options.tileSize ?? 256, options.tileSize ?? 256),
-          // How much of the map a single-tile layer renders. 1.5 is OpenLayers'
-          // own default (a view plus a margin, so small pans need no new image);
-          // 1 asks for the view itself, which is what the services that refuse a
-          // large render need (see MAX_VIEW_PIXELS).
-          ratio: options.ratio ?? 1.5,
-          transitionEffect: "resize",
-          noMagic: true, // never let OpenLayers rewrite the format
-          getURL: function (bounds) {
-            bounds = this.adjustBounds(bounds.clone());
-            const asked = this.getImageSize(bounds);
-            if (adapter.zoomAt((bounds.right - bounds.left) / asked.w) < minZoom) return null;
-            bounds.transform(adapter.sourceProjection, adapter.targetProjection);
-            // WMS 1.3.0 / EPSG:4326 uses latitude, longitude axis order, while the
-            // integrating service reads EPSG:2180 as northing, easting. As long as
-            // the view image is missing, every request asks under a fresh address,
-            // so no cache can answer it with the refused response.
-            // Asked for exactly the pixels that will be drawn, never more and never
-            // fewer - except for the layers that ask for half of them on purpose
-            // (`magnify`). Those are the drawings whose letters are the information,
-            // and the one way to get a service letter bigger is to have it drawn in
-            // an image of half the pixels and stretched over the place; the filter
-            // of the layer then takes that soft result apart again (see
-            // CONTRAST_FILTER). The megapixel cap is on what the service is asked to
-            // render, so it is applied to the pixels of the request and not to the
-            // pixels of the map the cell covers - a cell twice the editor's own asks
-            // for a megapixel and is drawn from it, the cap leaving it alone.
-            const magnify = options.magnify ?? 1;
-            const imageSize = adapter.requestImageSize({
-              w: asked.w / magnify,
-              h: asked.h / magnify
-            });
-            const request = {
-              BBOX: crs === "EPSG:2180" ? bounds2180(bounds) : bounds.toArray(true),
-              WIDTH: Math.max(64, Math.round(imageSize.w)),
-              HEIGHT: Math.max(64, Math.round(imageSize.h))
-            };
-            // The image the layer is showing belongs to the view it was rendered
-            // for. The moment another view is asked for - a pan, a zoom, a wider
-            // window - that image is no longer the view the reader is looking at,
-            // and it is still on the map: drawn at the offset of the place it was
-            // rendered for, with its own labels standing beside the labels of the
-            // new drawing, which is what the doubled numbers and names of the
-            // reports were. It goes now, at the request, and not when the answer
-            // to that request happens to arrive: a refused image would otherwise
-            // leave the wrong picture on the map for the whole of the retry.
-            const view = request.BBOX.join(",") + "@" + request.WIDTH + "x" + request.HEIGHT;
-            if (recovery.view && recovery.view !== view) this.removeBackBuffer();
-            recovery.view = view;
-            if (recovery.stamp) request._ = recovery.stamp;
-            return this.getFullRequestString(request);
-          },
-          getFullRequestString: function () {
-            this.params.CRS = crs;
-            return adapter.OL.Layer.Grid.prototype.getFullRequestString.apply(this, arguments);
-          },
-          // A zoom, and only a zoom, reaches here with a drawing of the old scale:
-          // OpenLayers would rescale the picture of the previous view and lay it
-          // over the new one, where every label of it appears a second time -
-          // washed out, at the size of the old zoom, and never in line with the
-          // new drawing. That is the doubled and blurred text of the reports, on
-          // one of the two paths that produced it (the other one, a pan, is
-          // answered in getURL). A zoom is a new drawing: the old picture goes,
-          // and the map shows what it has - the editor's base map or the photo
-          // layer behind it - until the new cells arrive.
-          applyBackBuffer: function (resolution) {
-            if (resolution !== this.gridResolution) {
-              this.removeBackBuffer();
-              return;
-            }
-            return adapter.OL.Layer.Grid.prototype.applyBackBuffer.apply(this, arguments);
-          }
-        });
-      return this.installLayer(layer, recovery, opacity, options);
-    }
-
-    /** The starting state of a layer's image recovery (see retryMissingImage). */
-    static newRecovery() {
       // `view` is the last area the layer asked for: the image the layer is
       // showing belongs to that area alone, so an image of any other area has
       // no business on the map (see getURL).
-      return { tried: 0, timer: null, stamp: null, view: null };
-    }
-
-    /**
-     * Put a built layer on the map and start watching it, and let the first one
-     * tell the adapter which map it is on.
-     * @param {any} layer layer built by createLayer or createTileLayer
-     * @param {{tried: number, timer: any, stamp: number|null, view: string|null}} recovery its state
-     * @param {number} opacity
-     * @param {any} options the layer's definition options (only `contrast` is read)
-     * @returns {any} the layer
-     */
-    installLayer(layer, recovery, opacity, options = {}) {
+      const recovery = { tried: 0, timer: null, stamp: null, view: null };
+      // The service's levels as resolutions of the standard grid, i.e. the same
+      // values as the editor's zoom levels, so its tiles line up with the tiles
+      // the map is drawn from and a hole is exactly one tile of that map.
+      // Level 19 is the last one the service has: above it OpenLayers keeps asking
+      // for level 19 and stretches that tile, which carries the detail the data has.
+      const maxZoom = Math.min(options.maxZ ?? TILE_MAX_ZOOM, TILE_MAX_ZOOM);
+      const resolutions = [];
+      for (let zoom = 0; zoom <= maxZoom; zoom++) {
+        resolutions.push(MERCATOR_WORLD_RESOLUTION / Math.pow(2, zoom));
+      }
+      const world = new this.OL.Bounds(-20037508.342789244, -20037508.342789244,
+        20037508.342789244, 20037508.342789244);
+      /** @type {any} */
+      let layer;
+      if (definition.kind === "wmts") {
+        layer = new this.OL.Layer.XYZ(name, url, {
+          isBaseLayer: false, visibility: false,
+          sphericalMercator: true,
+          tileSize: new this.OL.Size(256, 256),
+          maxExtent: world,
+          tileOriginCorner: "tl",
+          resolutions,
+          serverResolutions: resolutions,
+          // Above the last level the layer still draws the stretched level-19
+          // tiles, so OpenLayers must not hide it as out of range there.
+          alwaysInRange: true,
+          transitionEffect: "resize",
+          getURL: function (bounds) {
+            const level = Math.round(Math.log2(MERCATOR_WORLD_RESOLUTION / this.getServerResolution()));
+            if (level < minZoom || level > maxZoom) return null;
+            const tileUrl = adapter.OL.Layer.XYZ.prototype.getURL.call(this, bounds);
+            // As long as this layer misses an image, ask under a fresh address, so
+            // that no cache can answer with the refused response.
+            return recovery.stamp && tileUrl ? tileUrl + "&_=" + recovery.stamp : tileUrl;
+          }
+        });
+      } else {
+        const { layers, format } = definition;
+        const singleTile = options.singleTile ?? true;
+        // The system of the request. Everything the map itself can speak is asked
+        // for in EPSG:4326; the topographic objects need the system of the county
+        // services behind their integration (see to2180).
+        const crs = options.crs ?? "EPSG:4326";
+        // The photo layers are opaque mosaics: transparency is a contradiction there
+        // and OpenLayers answered it by switching their JPEG to PNG. Only the PNG
+        // overlays ask for it, so the requests stay as they were before 1.5.0.
+        // Ask for the service's own errors as documents, not as pictures. Asked the
+        // WMS way (INIMAGE, which is what OpenLayers asks for by default) a failing
+        // service paints its error into the image and that picture lands on the map:
+        // the grey plate with "Invalid CRS given" or "Error HRESULT E_FAIL has been
+        // returned from a call to a COM component." A document is not an image, so
+        // the cell stays a hole - as if the tile were never delivered - and the
+        // recovery below asks again.
+        /** @type {Record<string, string>} */
+        const params = { layers, format, version: "1.3.0", exceptions: "XML" };
+        if (format !== "image/jpeg") params.transparent = "true";
+        layer = new this.OL.Layer.WMS(name, url, params,
+          {
+            isBaseLayer: false, visibility: false,
+            singleTile,
+            // The cell of the map this layer is drawn in. The editor's own cells are
+            // 256 px (the value OpenLayers falls back to); the drawings whose letters
+            // are the information ask for half a kilometre of map per cell instead
+            // (LABEL_CELL), so a view is made of a quarter of the images - see above.
+            tileSize: new adapter.OL.Size(options.tileSize ?? 256, options.tileSize ?? 256),
+            // How much of the map a single-tile layer renders. 1.5 is OpenLayers'
+            // own default (a view plus a margin, so small pans need no new image);
+            // 1 asks for the view itself, which is what the services that refuse a
+            // large render need (see MAX_VIEW_PIXELS).
+            ratio: options.ratio ?? 1.5,
+            transitionEffect: "resize",
+            noMagic: true, // never let OpenLayers rewrite the format
+            getURL: function (bounds) {
+              bounds = this.adjustBounds(bounds.clone());
+              const asked = this.getImageSize(bounds);
+              if (adapter.zoomAt((bounds.right - bounds.left) / asked.w) < minZoom) return null;
+              bounds.transform(adapter.sourceProjection, adapter.targetProjection);
+              // WMS 1.3.0 / EPSG:4326 uses latitude, longitude axis order, while the
+              // integrating service reads EPSG:2180 as northing, easting. As long as
+              // the view image is missing, every request asks under a fresh address,
+              // so no cache can answer it with the refused response.
+              // Asked for exactly the pixels that will be drawn, never more and never
+              // fewer - except for the layers that ask for half of them on purpose
+              // (`magnify`). Those are the drawings whose letters are the information,
+              // and the one way to get a service letter bigger is to have it drawn in
+              // an image of half the pixels and stretched over the place; the filter
+              // of the layer then takes that soft result apart again (see
+              // CONTRAST_FILTER). The megapixel cap is on what the service is asked to
+              // render, so it is applied to the pixels of the request and not to the
+              // pixels of the map the cell covers - a cell twice the editor's own asks
+              // for a megapixel and is drawn from it, the cap leaving it alone.
+              const magnify = options.magnify ?? 1;
+              const imageSize = adapter.requestImageSize({
+                w: asked.w / magnify,
+                h: asked.h / magnify
+              });
+              const request = {
+                BBOX: crs === "EPSG:2180" ? bounds2180(bounds) : bounds.toArray(true),
+                WIDTH: Math.max(64, Math.round(imageSize.w)),
+                HEIGHT: Math.max(64, Math.round(imageSize.h))
+              };
+              // The image the layer is showing belongs to the view it was rendered
+              // for. The moment another view is asked for - a pan, a zoom, a wider
+              // window - that image is no longer the view the reader is looking at,
+              // and it is still on the map: drawn at the offset of the place it was
+              // rendered for, with its own labels standing beside the labels of the
+              // new drawing, which is what the doubled numbers and names of the
+              // reports were. It goes now, at the request, and not when the answer
+              // to that request happens to arrive: a refused image would otherwise
+              // leave the wrong picture on the map for the whole of the retry.
+              const view = request.BBOX.join(",") + "@" + request.WIDTH + "x" + request.HEIGHT;
+              if (recovery.view && recovery.view !== view) this.removeBackBuffer();
+              recovery.view = view;
+              if (recovery.stamp) request._ = recovery.stamp;
+              return this.getFullRequestString(request);
+            },
+            getFullRequestString: function () {
+              this.params.CRS = crs;
+              return adapter.OL.Layer.Grid.prototype.getFullRequestString.apply(this, arguments);
+            },
+            // A zoom, and only a zoom, reaches here with a drawing of the old scale:
+            // OpenLayers would rescale the picture of the previous view and lay it
+            // over the new one, where every label of it appears a second time -
+            // washed out, at the size of the old zoom, and never in line with the
+            // new drawing. That is the doubled and blurred text of the reports, on
+            // one of the two paths that produced it (the other one, a pan, is
+            // answered in getURL). A zoom is a new drawing: the old picture goes,
+            // and the map shows what it has - the editor's base map or the photo
+            // layer behind it - until the new cells arrive.
+            applyBackBuffer: function (resolution) {
+              if (resolution !== this.gridResolution) {
+                this.removeBackBuffer();
+                return;
+              }
+              return adapter.OL.Layer.Grid.prototype.applyBackBuffer.apply(this, arguments);
+            }
+          });
+      }
       layer.setOpacity(opacity);
-      this.map.addLayer(layer);
+      // Once the OpenLayers map is known - from the first layer the SDK put on
+      // it - every layer goes straight onto it; before that, through the SDK's
+      // own map, which is what tells us which OpenLayers map it is.
+      const target = this.olMap ?? this.map;
+      target.addLayer(layer);
+      if (!this.olMap && layer.map) {
+        this.olMap = layer.map;
+        if (this.zoomResolution === null) this.zoomResolution = this.getMapResolution();
+        this.attachMapEvents();
+      }
       const filter = CONTRAST_FILTER[options.contrast];
       if (filter && layer.div) {
         if (filter.includes("url(#")) this.installLabelFilters();
         layer.div.style.filter = filter;
       }
       this.retryMissingImage(layer, recovery);
-      // The map becomes known once its first layer is attached to it; from then
-      // on every later layer can go straight onto it.
-      if (!this.olMap && layer.map) {
-        this.olMap = layer.map;
-        if (this.zoomResolution === null) this.zoomResolution = this.getMapResolution();
-        this.attachMapEvents();
-      } else if (this.olMap) {
-        this.olMap.addLayer(layer);
-      }
       return layer;
     }
 
@@ -671,57 +701,6 @@
       holder.innerHTML = CONTRAST_SVG;
       this.labelFilters = holder.firstChild;
       document.body.appendChild(this.labelFilters);
-    }
-
-    /**
-     * The standard ortho as the editor's own tiles. The Geoportal publishes it as
-     * Web Mercator tiles (EPSG:3857, 256 px, levels 0-19) whose indices are the
-     * ordinary z/x/y of the grid the editor's map is drawn from, so OpenLayers
-     * asks the service for exactly the tile that belongs in each cell of that
-     * grid. A refused tile is one hole with the editor's base map behind it,
-     * instead of a whole-view image whose refusal used to leave the view empty.
-     * Level 19 is the last one the service has: above it OpenLayers keeps asking
-     * for level 19 and stretches that tile, which carries the detail the data has.
-     * @param {{ name: string, url: string, options: any }} definition
-     * @param {number} opacity
-     */
-    createTileLayer({ name, url, options }, opacity) {
-      const adapter = this;
-      const minZoom = options.minZ ?? 0;
-      const maxZoom = Math.min(options.maxZ ?? TILE_MAX_ZOOM, TILE_MAX_ZOOM);
-      // State of this layer's image recovery, shared with retryMissingImage.
-      const recovery = WmsAdapter.newRecovery();
-      // The service's levels as resolutions of the standard grid, i.e. the same
-      // values as the editor's zoom levels, so its tiles line up with the tiles
-      // the map is drawn from and a hole is exactly one tile of that map.
-      const resolutions = [];
-      for (let zoom = 0; zoom <= maxZoom; zoom++) {
-        resolutions.push(MERCATOR_WORLD_RESOLUTION / Math.pow(2, zoom));
-      }
-      const world = new this.OL.Bounds(-20037508.342789244, -20037508.342789244,
-        20037508.342789244, 20037508.342789244);
-      const layer = new this.OL.Layer.XYZ(name, url, {
-        isBaseLayer: false, visibility: false,
-        sphericalMercator: true,
-        tileSize: new this.OL.Size(256, 256),
-        maxExtent: world,
-        tileOriginCorner: "tl",
-        resolutions,
-        serverResolutions: resolutions,
-        // Above the last level the layer still draws the stretched level-19
-        // tiles, so OpenLayers must not hide it as out of range there.
-        alwaysInRange: true,
-        transitionEffect: "resize",
-        getURL: function (bounds) {
-          const level = Math.round(Math.log2(MERCATOR_WORLD_RESOLUTION / this.getServerResolution()));
-          if (level < minZoom || level > maxZoom) return null;
-          const tileUrl = adapter.OL.Layer.XYZ.prototype.getURL.call(this, bounds);
-          // As long as this layer misses an image, ask under a fresh address, so
-          // that no cache can answer with the refused response.
-          return recovery.stamp && tileUrl ? tileUrl + "&_=" + recovery.stamp : tileUrl;
-        }
-      });
-      return this.installLayer(layer, recovery, opacity, options);
     }
 
     /**
