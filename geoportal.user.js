@@ -524,14 +524,10 @@
       // services behind their integration (see to2180).
       const crs = options.crs ?? "EPSG:4326";
       // State of this layer's image recovery, shared with retryMissingImage.
-      // `view` is the last area the layer asked for: the image the layer is
-      // showing belongs to that area alone, so an image of any other area has
-      // no business on the map (see getURL).
-      const recovery = { tried: 0, timer: null, stamp: null, view: null };
+      const recovery = WmsAdapter.newRecovery();
       // The photo layers are opaque mosaics: transparency is a contradiction there
       // and OpenLayers answered it by switching their JPEG to PNG. Only the PNG
       // overlays ask for it, so the requests stay as they were before 1.5.0.
-      /** @type {Record<string, string>} */
       // Ask for the service's own errors as documents, not as pictures. Asked the
       // WMS way (INIMAGE, which is what OpenLayers asks for by default) a failing
       // service paints its error into the image and that picture lands on the map:
@@ -539,6 +535,7 @@
       // returned from a call to a COM component." A document is not an image, so
       // the cell stays a hole - as if the tile were never delivered - and the
       // recovery below asks again.
+      /** @type {Record<string, string>} */
       const params = { layers, format, version: "1.3.0", exceptions: "XML" };
       if (format !== "image/jpeg") params.transparent = "true";
       const layer = new this.OL.Layer.WMS(name, url, params,
@@ -625,6 +622,14 @@
       return this.installLayer(layer, recovery, opacity, options);
     }
 
+    /** The starting state of a layer's image recovery (see retryMissingImage). */
+    static newRecovery() {
+      // `view` is the last area the layer asked for: the image the layer is
+      // showing belongs to that area alone, so an image of any other area has
+      // no business on the map (see getURL).
+      return { tried: 0, timer: null, stamp: null, view: null };
+    }
+
     /**
      * Put a built layer on the map and start watching it, and let the first one
      * tell the adapter which map it is on.
@@ -643,10 +648,14 @@
         layer.div.style.filter = filter;
       }
       this.retryMissingImage(layer, recovery);
+      // The map becomes known once its first layer is attached to it; from then
+      // on every later layer can go straight onto it.
       if (!this.olMap && layer.map) {
         this.olMap = layer.map;
         if (this.zoomResolution === null) this.zoomResolution = this.getMapResolution();
         this.attachMapEvents();
+      } else if (this.olMap) {
+        this.olMap.addLayer(layer);
       }
       return layer;
     }
@@ -681,10 +690,7 @@
       const minZoom = options.minZ ?? 0;
       const maxZoom = Math.min(options.maxZ ?? TILE_MAX_ZOOM, TILE_MAX_ZOOM);
       // State of this layer's image recovery, shared with retryMissingImage.
-      // `view` is the last area the layer asked for: the image the layer is
-      // showing belongs to that area alone, so an image of any other area has
-      // no business on the map (see getURL).
-      const recovery = { tried: 0, timer: null, stamp: null, view: null };
+      const recovery = WmsAdapter.newRecovery();
       // The service's levels as resolutions of the standard grid, i.e. the same
       // values as the editor's zoom levels, so its tiles line up with the tiles
       // the map is drawn from and a hole is exactly one tile of that map.
