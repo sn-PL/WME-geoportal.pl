@@ -9,7 +9,7 @@ when a service refuses an image.
 ```bash
 cd test
 npm install        # jsdom, typescript, and the OpenLayers 2.13.1 sources (~2.9 MB, into .cache/)
-npm test           # ~40 s, 274 checks
+npm test           # ~40 s, 280 checks
 TILE_MANAGER=0 npm test       # the same checks on a map without OpenLayers' tile manager
 node run.cjs requests tiles   # only some suites
 TEST_VERBOSE=1 npm test       # let the page's console through

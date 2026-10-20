@@ -148,12 +148,23 @@ module.exports = async function layers(report) {
   const lettered = names.filter(name => LAYERS[name].contrast === 'white');
   report.check('every drawing that is strokes and points is white ink with a black outline',
     /^brightness\(0\) invert\(1\) url\(#geoportal-labels-ink\)$/.test(filters.white) &&
-    lettered.length === 7 &&
-    ['Geoportal - podział adm', 'Geoportal - obiekty topograficzne', 'Geoportal - adresy',
-      'Geoportal - ulice', 'Geoportal - place', 'Geoportal - adresy, place i ulice w jednym',
+    lettered.length === 3 &&
+    ['Geoportal - podział adm', 'Geoportal - obiekty topograficzne',
       'Geoportal - przejazdy kolejowe (wymagany duży zoom)']
       .every(name => LAYERS[name].contrast === 'white'),
-    `${lettered.length} layers: parcels, topographic objects, addresses, streets, places, crossings`);
+    `${lettered.length} layers: parcels, topographic objects, crossings`);
+  // Round 27: the addresses, the streets and the places are back to what the service
+  // draws. A street is a wide translucent surface in the service's drawing, and making
+  // every pixel of it white turns the whole street into a white band across the photo
+  // with the two thin lines of the band's edge as its only detail - the report of 10.2026.
+  report.check('the addresses, the streets and the places are drawn exactly as the service draws them',
+    ['Geoportal - adresy', 'Geoportal - ulice', 'Geoportal - place',
+      'Geoportal - adresy, place i ulice w jednym'].every(name =>
+      LAYERS[name].contrast === false &&
+      registry[name].definition.options.magnify === undefined &&
+      registry[name].definition.options.tileSize === undefined &&
+      !(registry[name].instance?.div?.style?.filter)) ,
+    'no filter, no magnified request, no larger cell');
   // The five boundary layers draw translucent coloured areas along with their names,
   // so they cannot be made white without painting those areas over the map as white
   // slabs. Their names come from the service as a very pale letter on a slightly
@@ -182,13 +193,13 @@ module.exports = async function layers(report) {
   // are the information. Every other layer is asked for the pixels it is drawn with.
   const magnified = names.filter(name => registry[name].definition.options.magnify !== undefined);
   report.check('every drawing whose letters are the information asks for half the pixels',
-    magnified.length === 12 &&
+    magnified.length === 8 &&
     magnified.every(name => registry[name].definition.options.magnify === env.internals.LABEL_MAGNIFY) &&
     magnified.every(name => LAYERS[name].contrast === 'white' || LAYERS[name].contrast === 'outline'),
     `${magnified.length} layers, all at twice the size`);
   report.check('no other layer is drawn at a size other than its own',
     names.filter(name => registry[name].definition.options.magnify === undefined ||
-      registry[name].definition.options.magnify === 1).length === names.length - 12,
+      registry[name].definition.options.magnify === 1).length === names.length - 8,
     'the ortho, the roads, the BDOT surfaces and the thematic maps');
 
   // Of the four ways a drawing is made to read over the imagery, two lift the ink the

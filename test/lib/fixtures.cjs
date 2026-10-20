@@ -94,23 +94,23 @@ const LAYERS = {
   'Geoportal - adresy': {
     kind: 'grid', service: SERVICES.adresy, category: 'Adresy i Ulice',
     layers: 'A07_Punkty_adresowe', format: 'image/png', minZ: 14, singleTile: false,
-    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, magnify: 2, cell: 1024, contrast: 'white'
+    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, contrast: false
   },
   'Geoportal - ulice': {
     kind: 'grid', service: SERVICES.adresy, category: 'Adresy i Ulice',
     layers: 'A08_Ulice_Linie', format: 'image/png', minZ: 14, singleTile: false,
-    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, magnify: 2, cell: 1024, contrast: 'white'
+    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, contrast: false
   },
   'Geoportal - place': {
     kind: 'grid', service: SERVICES.adresy, category: 'Adresy i Ulice',
     layers: 'A08_Ulice_Powierzchnie', format: 'image/png', minZ: 14, singleTile: false,
-    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, magnify: 2, cell: 1024, contrast: 'white'
+    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, contrast: false
   },
   'Geoportal - adresy, place i ulice w jednym': {
     kind: 'grid', service: SERVICES.adresy, category: 'Adresy i Ulice',
     layers: 'A07_Punkty_adresowe,A08_Ulice_Powierzchnie,A08_Ulice_Linie',
     format: 'image/png', minZ: 14, singleTile: false, ratio: 1.5, crs: 'EPSG:4326',
-    hasOpacity: false, magnify: 2, cell: 1024, contrast: 'white'
+    hasOpacity: false, contrast: false
   },
   'Geoportal - przejazdy kolejowe (wymagany duży zoom)': {
     kind: 'grid', service: SERVICES.rail, category: 'Topografia / Inne',

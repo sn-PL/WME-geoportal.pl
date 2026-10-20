@@ -159,7 +159,9 @@ module.exports = async function requests(report) {
   // same layers are drawn in cells of the map of their own size - twice the editor's
   // (1024 px) or eight times it (2048 px, the two layers whose every parcel or obręb
   // carries a number) - so a view is made of a fraction of the images, every one of
-  // which the service puts its own copy of every name into.
+  // which the service puts its own copy of every name into. The addresses, the streets
+  // and the places are not among them since round 27: they are the service's drawing,
+  // cell for cell.
   for (const name of LAYER_ORDER.filter(name => LAYERS[name].kind === 'grid')) {
     const requests = env.requestsOf(env.layer(name));
     const sizes = [...new Set(requests.map(url => `${params(url).WIDTH}x${params(url).HEIGHT}`))];
@@ -181,7 +183,7 @@ module.exports = async function requests(report) {
   // chances for one number to be drawn twice - and this is the number that fell.
   const gridSize = { w: 800, h: 600 };
   const cellsOver = cell => (Math.ceil(gridSize.w / cell) + 1) * (Math.ceil(gridSize.h / cell) + 1);
-  for (const name of ['Geoportal - podział adm', 'Geoportal - Miasta', 'Geoportal - adresy']) {
+  for (const name of LAYER_ORDER.filter(name => LAYERS[name].cell)) {
     const layer = env.layer(name);
     const asked = params(env.requestOf(layer));
     const image = env.tileAt(layer, 0, 0)?.imgDiv;

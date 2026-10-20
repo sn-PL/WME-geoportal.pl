@@ -104,9 +104,14 @@ for (const name of SHOW) {
   // BDOT surfaces) nothing changed in this round, and the column says so.
   const previous = kind === 'white'
     ? { css: 'brightness(0) invert(1) url(#geoportal-previous)', caption: 'poprzednio &mdash; s&#322;absze wyg&#322;adzanie (0,8 px)' }
-    : { css: filters[kind] || 'none', caption: kind === 'outline'
-        ? 'bez zmian od rundy 24 &mdash; rysunek us&#322;ugi + obw&oacute;dka'
-        : 'bez zmian od rundy 20 &mdash; rozja&#347;nienie i bia&#322;a kraw&#281;d&#378;' };
+    : !kind
+      // The addresses, the streets and the places since round 27: the same chain as
+      // the re-drawn layers, i.e. what the service's street surface became - a white
+      // band over the photo - against the service's own drawing in the last column.
+      ? { css: 'brightness(0) invert(1) url(#geoportal-previous)', caption: 'poprzednio (do rundy 26) &mdash; ca&#322;y rysunek bielony: ulica jako bia&#322;a wst&#281;ga' }
+      : { css: filters[kind], caption: kind === 'outline'
+          ? 'bez zmian od rundy 24 &mdash; rysunek us&#322;ugi + obw&oacute;dka'
+          : 'bez zmian od rundy 20 &mdash; rozja&#347;nienie i bia&#322;a kraw&#281;d&#378;' };
   rows.push({
     name: name.replace('Geoportal - ', ''),
     kind,
@@ -196,7 +201,11 @@ ${svg}
     1,2 px i skraca zbocze progu (nachylenie 8): kontur litery przestaje by&#263;
     schodkowy, a kraw&#281;d&#378; kreski jest delikatnie zmi&#281;kczona. Cienkie linie
     rysunku zostaj&#261; &#8212; ich &347;rodek po rozmyciu nadal przekracza pr&oacute;g.
-    Kolumna &bdquo;poprzednio&rdquo; pokazuje &#322;a&#324;cuch z rundy 26.</div>
+    Kolumna &bdquo;poprzednio&rdquo; pokazuje &#322;a&#324;cuch z rundy 26.
+    <b>Adresy, ulice i place</b> s&#261; od rundy 27 rysowane tak, jak rysuje je
+    us&#322;uga: w ich wierszach trzecia kolumna nie ma filtra, a &#347;rodkowa
+    pokazuje, co robi&#322;o bielenie &mdash; powierzchnia ulicy zamienia&#322;a si&#281;
+    w bia&#322;&#261; wst&#281;g&#281; przez zdj&#281;cie, a numer domu w bia&#322;&#261; plam&#281;.</div>
 </fieldset>
 ${rows.map(row => `<div class="row">
   <h2>${row.name}<small>${row.kind ? `filtr: ${row.kind}` : 'bez filtra'} &middot; ${row.detail}</small></h2>
