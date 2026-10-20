@@ -92,11 +92,51 @@ module.exports = async function layers(report) {
     .getElementById('geoportal-label-filters');
   const filterElement = id => svg && svg.querySelector(`filter[id="${id}"]`);
   const ink = filterElement('geoportal-labels-ink');
-  report.check('the filter that re-draws the ink is on the page, once',
-    !!svg && !!ink && (svg.querySelectorAll('filter').length === 1) &&
+  report.check('the filter that re-draws the ink is on the page',
+    !!svg && !!ink &&
     Object.values(filters).every(filter => !filter.includes('url(#') ||
-      filter.includes('url(#geoportal-labels-ink)')),
-    svg ? `${svg.querySelectorAll('filter').length} filter, pointed at by ${Object.values(filters).filter(f => f.includes('url(#')).length} layers` : 'no filter on the page');
+      filter.includes('url(#geoportal-labels-ink)') ||
+      filter.includes('url(#geoportal-labels-plate)')),
+    svg ? `${svg.querySelectorAll('filter').length} filters, pointed at by ${Object.values(filters).filter(f => f.includes('url(#')).length} layers` : 'no filter on the page');
+  // The boundary layers point at their own filter now: their names are lifted to
+  // white ink through a colour mask, while the coloured areas of the drawing keep
+  // the colours the service drew - so the pale lettering of the reports reads over
+  // the satellite imagery instead of washing out into it.
+  const plate = filterElement('geoportal-labels-plate');
+  report.check('the filter that whitens only the names of the boundary layers is on the page',
+    !!plate && plate.querySelector('feFlood[flood-color="#fff"]') !== null &&
+    filters.outline === 'url(#geoportal-labels-plate)',
+    plate ? `${plate.querySelectorAll('fePrimitive, feGaussianBlur, feComponentTransfer, feColorMatrix, feFlood, feComposite, feMorphology, feMerge').length} primitives` : 'no plate filter on the page');
+  report.check('the name mask is built from the lightness of the drawing itself',
+    (() => {
+      if (!plate) return false;
+      const tables = [...plate.querySelectorAll('feFuncR, feFuncG, feFuncB')]
+        .map(func => func.getAttribute('tableValues'));
+      const matrices = [...plate.querySelectorAll('feColorMatrix')]
+        .map(matrix => matrix.getAttribute('type'));
+      return tables.length === 6 &&
+        tables.slice(0, 3).every(values => values.split(/\s+/).map(Number)[2] >= 0.7) &&
+        tables.slice(3).every(values => values.split(/\s+/).map(Number)[0] >= 0.7) &&
+        matrices.every(type => type === 'luminanceToAlpha');
+    })(),
+    'a rising table per channel (min >= ~0.76), a falling one (max <= ~0.83), both turned into alpha');
+  report.check('the recognised names get the same smoothing and casing as every ink',
+    (() => {
+      if (!plate) return false;
+      const blurs = [...plate.querySelectorAll('feGaussianBlur')];
+      const transfer = plate.querySelector('feFuncA[type="linear"]');
+      const dilate = plate.querySelector('feMorphology');
+      return blurs.length === 1 && Number(blurs[0].getAttribute('stdDeviation')) > 1 &&
+        Number(blurs[0].getAttribute('stdDeviation')) <= 1.6 &&
+        !!transfer && Number(transfer.getAttribute('slope')) >= 5 &&
+        dilate?.getAttribute('operator') === 'dilate' &&
+        dilate?.getAttribute('radius') === '1' &&
+        !!plate.querySelector('feFlood[flood-color="#000"]');
+    })(),
+    'one blur of 1-1.6 px, the same threshold as the ink, one pixel of black casing');
+  report.check('everything else of those layers passes through untouched',
+    !!plate && plate.querySelector('feMerge feMergeNode')?.getAttribute('in') === 'SourceGraphic',
+    'the coloured areas and the boundary lines stay what the service drew, under the casing');
   report.check('every edge is snapped back onto the pixel grid, nothing is left half lit',
     (() => {
       const transfer = ink && ink.querySelector('feFuncA');
@@ -157,19 +197,21 @@ module.exports = async function layers(report) {
   // The five boundary layers draw translucent coloured areas along with their names,
   // so they cannot be made white without painting those areas over the map as white
   // slabs. Their names come from the service as a very pale letter on a slightly
-  // paler plate of its own (measured: 230, 217, 231 against 250, 248, 251), so they
-  // are pulled apart with contrast instead of being lifted into the same white, and
-  // they take the same one pixel of black outline as every other layer.
-  report.check('the layers that draw coloured areas keep their ink and only gain the black outline',
-    filters.outline === 'drop-shadow(0 0 1px #000) drop-shadow(0 0 1px #000)' &&
+  // paler plate of its own (measured: 230, 217, 231 against 250, 248, 251), which is
+  // what the report called unreadable over the satellite imagery - so the filter of
+  // the layer lifts exactly those pixels into pure white ink with a one-pixel black
+  // casing, and leaves every other pixel of the drawing as the service drew it.
+  report.check('the layers that draw coloured areas get their names whitened and cased',
+    filters.outline === 'url(#geoportal-labels-plate)' &&
     ['Geoportal - Miasta', 'Geoportal - gminy', 'Geoportal - powiaty', 'Geoportal - województwa',
       'Geoportal - Granica PL'].every(name => LAYERS[name].contrast === 'outline') &&
     Object.entries(LAYERS).filter(([, entry]) => entry.contrast === 'outline').length === 5,
     filters.outline);
-  report.check('nothing of those layers is recoloured, brightened or thresholded',
+  report.check('only the names of those layers are recoloured; the rest keeps its own colour',
     !filters.outline.includes('invert') && !filters.outline.includes('brightness') &&
-    !filters.outline.includes('url(#') && !filters.outline.includes('#fff'),
-    'the coloured areas, the boundary lines and the pale lettering stay what the service drew');
+    !filters.outline.includes('#fff)') && !filters.outline.includes('drop-shadow'),
+    'a mask built inside the SVG filter picks the pale grey letters out; the coloured ' +
+    'areas, the boundary lines and everything darker pass through as SourceGraphic');
   report.check('only the drawings whose colour is the map itself keep a white casing',
     LAYERS['Geoportal - drogi'].contrast === 'dark' &&
     Object.entries(LAYERS).filter(([, entry]) => entry.contrast === 'colour').length === 8 &&

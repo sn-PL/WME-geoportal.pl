@@ -99,36 +99,47 @@
   // letter's own edge, not a halo - nothing is blurred and nothing is added on top of
   // the ink. This is the closest thing to a vector drawing a raster service can give.
   //
-  // Where that cannot be done, the drawing keeps its ink untouched and is only given
-  // the casing. That is the five boundary layers: they draw translucent coloured
-  // areas along with their names (the obreb fills of "Miasta"), so making every pixel
-  // white would paint those areas over the map as white slabs, and putting the whole
-  // drawing through the threshold of the filter turns their wide, pale lettering into
-  // one bright slab (which is what the report of 1.6.0 caught: letters at 230, 217,
-  // 231 on their own plate at 250, 248, 251 read as a single washed-out shape, and
-  // the same service draws the towns of the same layer in crisp white, so the layer
-  // looks "mixed" - two styles in one drawing). Those layers are asked for at twice
-  // the size like the rest, and their whole drawing - names, boundary lines and the
-  // coloured areas - gets one pixel of black outline, which is what their
-  // already-white letters need over a pale field. Nothing of their ink is recoloured,
-  // brightened or thresholded.
+  // Where the ink itself must keep its colours, the drawing goes through an SVG
+  // filter instead of being recoloured outright. That is the five boundary layers:
+  // they draw translucent coloured areas along with their names (the obreb fills of
+  // "Miasta"), so making every pixel white would paint those areas over the map as
+  // white slabs, and putting the whole drawing through the threshold of the ink
+  // filter turns their wide, pale lettering into one bright slab (which is what the
+  // report of 1.6.0 caught: letters at 230, 217, 231 on their own plate at 250, 248,
+  // 251 read as a single washed-out shape, and the same service draws the towns of
+  // the same layer in crisp white, so the layer looks "mixed" - two styles in one
+  // drawing). Those layers are asked for at twice the size like the rest, and the
+  // filter re-draws them: every name becomes pure white ink with a one-pixel black
+  // casing grown around it, while every other pixel of the drawing - the coloured
+  // areas and the boundary lines - keeps exactly the colour the service drew, under
+  // the same casing. The pale names of the reports (230 on a plate of 250) were not
+  // sharp enough over the WME satellite imagery; white ink with a black edge is what
+  // reads there. A pixel is recognised as part of a name by its colour alone: the
+  // service draws its place names as near-white text on a light plate of its own, so
+  // every nearly grey pixel (max-min < 16) whose lightness crosses the plateau of
+  // that lettering (min >= 195) is lifted to white, and everything more colourful or
+  // darker than that - the magenta and blue fills, the dashed boundary lines - passes
+  // through untouched. The recognition happens before the blur, so the threshold
+  // behind it does not matter: a name's pixels are already opaque white ink when the
+  // ink filter dilates its own casing around them.
   const CONTRAST_FILTER = {
     // the drawings that are strokes and points: white ink, one pixel of black casing
     white: "brightness(0) invert(1) url(#geoportal-labels-ink)",
-    // the drawings that carry coloured areas: nothing of their ink is touched, they
-    // only get the same one pixel of black casing
-    outline: "drop-shadow(0 0 1px #000) drop-shadow(0 0 1px #000)",
+    // the drawings that carry coloured areas: their areas keep their colours, their
+    // names become white ink with the same one pixel of black casing
+    outline: "url(#geoportal-labels-plate)",
     // the drawings whose colour is the map itself: lifted, never recoloured
     dark: "brightness(2) drop-shadow(0 0 1px #fff) drop-shadow(0 0 1px #fff)",
     colour: "brightness(2.2) saturate(1.7) " +
       "drop-shadow(0 0 1px #fff) drop-shadow(0 0 1px #fff)"
   };
-  // The filter itself, as an element of the page: a CSS filter cannot express "every
-  // alpha becomes 0 or 1" nor "grow the shape by one pixel", so the one that re-draws
-  // the ink is an SVG filter the layer's element points at - the same one for both
-  // kinds above. The threshold is alpha * 4 - 1.1 (the pixel is ink or it is not,
-  // from a quarter of the service's own coverage up), and the casing is one pixel of
-  // dilate under a black flood, merged under the ink.
+  // The filters themselves, as elements of the page: a CSS filter cannot express
+  // "every alpha becomes 0 or 1" nor "grow the shape by one pixel" nor "make every
+  // pale grey pixel white and keep the rest", so the two that re-draw the ink are
+  // SVG filters the layer's element points at. The threshold is alpha * 4 - 1.1
+  // (the pixel is ink or it is not, from a quarter of the service's own coverage
+  // up), and the casing is one pixel of dilate under a black flood, merged under
+  // the ink.
   const CONTRAST_SVG =
     '<svg id="geoportal-label-filters" width="0" height="0" ' +
     'style="position:absolute;left:0;top:0;pointer-events:none">' +
@@ -154,6 +165,51 @@
     '<feFlood flood-color="#000" result="black"/>' +
     '<feComposite in="black" in2="grown" operator="in" result="casing"/>' +
     '<feMerge><feMergeNode in="casing"/><feMergeNode in="ink"/></feMerge>' +
+    '</filter>' +
+    // The boundary layers: their names become ink, everything else stays. The name
+    // mask is built from the drawing's own colours, per channel with a linear
+    // feFuncA (no colour matrices): the source is premultiplied, so a channel's
+    // value is its share of the pixel's lightness. min(R,G,B) >= 195/255 means all
+    // three channels are at least that bright - the plateau of the service's pale
+    // lettering, whose measured span is 217..251 - and max(R,G,B) <= 211/255 means
+    // none of them reaches much above that, i.e. the pixel is nearly grey: the
+    // product of the two ramps is the name's alpha alone. A coloured area (one
+    // channel high, the others low) and a dark boundary line fail one of the ramps
+    // and pass through untouched. Behind the mask the same pipeline as for the ink:
+    // blur, threshold, one pixel of black casing - and the names come out pure
+    // white, which is what reads over the satellite imagery. The recognition is in
+    // front of the blur, so the blurred mask never has to be thresholded again.
+    '<filter id="geoportal-labels-plate" x="-20%" y="-20%" width="140%" height="140%" ' +
+    'color-interpolation-filters="sRGB">' +
+    '<feComponentTransfer in="SourceGraphic" result="nameLow">' +
+    '<feFuncR type="table" tableValues="0 0 1"/>' +
+    '<feFuncG type="table" tableValues="0 0 1"/>' +
+    '<feFuncB type="table" tableValues="0 0 1"/>' +
+    '<feFuncA type="table" tableValues="0 1"/>' +
+    '</feComponentTransfer>' +
+    '<feColorMatrix in="nameLow" type="luminanceToAlpha" result="nameMin"/>' +
+    '<feComponentTransfer in="SourceGraphic" result="nameHigh">' +
+    '<feFuncR type="table" tableValues="1 1 0"/>' +
+    '<feFuncG type="table" tableValues="1 1 0"/>' +
+    '<feFuncB type="table" tableValues="1 1 0"/>' +
+    '<feFuncA type="table" tableValues="0 1"/>' +
+    '</feComponentTransfer>' +
+    '<feColorMatrix in="nameHigh" type="luminanceToAlpha" result="nameMax"/>' +
+    '<feComposite in="nameMin" in2="nameMax" operator="in" result="nameMaskRaw"/>' +
+    '<feGaussianBlur in="nameMaskRaw" stdDeviation="1.2" result="nameMaskSoft"/>' +
+    '<feComponentTransfer in="nameMaskSoft" result="nameMask">' +
+    '<feFuncA type="linear" slope="8" intercept="-3.4"/>' +
+    '</feComponentTransfer>' +
+    '<feFlood flood-color="#fff" result="whiteInk"/>' +
+    '<feComposite in="whiteInk" in2="nameMask" operator="in" result="names"/>' +
+    '<feMorphology in="nameMask" operator="dilate" radius="1" result="grownNames"/>' +
+    '<feFlood flood-color="#000" result="black"/>' +
+    '<feComposite in="black" in2="grownNames" operator="in" result="casing"/>' +
+    '<feMerge>' +
+    '<feMergeNode in="SourceGraphic"/>' +
+    '<feMergeNode in="casing"/>' +
+    '<feMergeNode in="names"/>' +
+    '</feMerge>' +
     '</filter>' +
     '</defs></svg>';
   // How much smaller than the drawing the image asked for is, i.e. how many times
