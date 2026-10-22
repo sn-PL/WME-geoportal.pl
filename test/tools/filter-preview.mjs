@@ -185,9 +185,9 @@ ${svg}
   <b>tak rysuje us&#322;uga</b> (obraz 1:1, bez filtra),
   <b>tak by&#322;o poprzednio</b> (bielenie po kryciu &mdash; z numeru dzia&#322;ki
   zostawa&#322;a bia&#322;a plama, bo tabliczka pod cyframi te&#380; jest nieprzezroczysta) i
-  <b>tak jest teraz</b> (klucz po ciemno&#347;ci: cyfry czysto bia&#322;e z czarn&#261;
-  obw&oacute;dk&#261;, tabliczka nietkni&#281;ta, a linie dzia&#322;ek id&#261; osobn&#261;
-  ga&#322;&#281;zi&#261; filtra, wi&#281;c s&#261; g&#322;adkie).
+  <b>tak jest teraz</b> (bia&#322;y jest ca&#322;y kszta&#322;t litery, nie sam jej kontur,
+  wi&#281;c cyfry s&#261; lite, z jednopikselow&#261; czarn&#261; obw&oacute;dk&#261;;
+  tabliczka i linie dzia&#322;ek zostaj&#261; jak w us&#322;udze).
   Miejsce: Imbramowice, ${centre.lat.toFixed(5)}, ${centre.lon.toFixed(5)}.
 </p>
 <fieldset><legend>Podgl&#261;d</legend>
@@ -195,10 +195,11 @@ ${svg}
     <code id="zx">2&times;</code></label>
   <div class="note">Trzecia kolumna u&#380;ywa filtr&oacute;w, kt&oacute;re skrypt ma teraz:
     <code>white</code> (numery dzia&#322;ek) i <code>names</code> (nazwy granic):
-    klucz po ciemno&#347;ci (numery) i po kryciu (nazwy granic), czysto bia&#322;y
-    atrament z jednopikselow&#261; czarn&#261; obw&oacute;dk&#261;, obraz z kom&oacute;rki
-    2048 px w po&#322;owie pikseli, wi&#281;c litery s&#261; dwa razy wi&#281;ksze,
-    a tabliczki i kolorowe obszary zostaj&#261; jak w us&#322;udze,
+    ca&#322;y kszta&#322;t litery na bia&#322;o z jednopikselow&#261; czarn&#261;
+    obw&oacute;dk&#261; (a nie sam kontur, kt&oacute;ry dawa&#322; puste, szare litery),
+    obraz z kom&oacute;rki 2048 px w po&#322;owie pikseli, wi&#281;c litery s&#261; dwa razy
+    wi&#281;ksze, a tabliczki i kolorowe obszary zostaj&#261; jak w us&#322;udze, a nazwy
+    granic dostaj&#261; czarn&#261; obw&oacute;dk&#281; zamiast bia&#322;ego halo,
     <code>dark</code> i <code>colour</code> (drogi, BDOT: rozja&#347;nienie) &mdash;
     a adresy, ulice, place, przejazdy i obiekty topograficzne <b>nie maj&#261;
     &#380;adnego filtra</b>. Rundy 23&ndash;27 bieli&#322;y ca&#322;y rysunek po kryciu
@@ -216,9 +217,9 @@ ${rows.map(row => `<div class="row">
         <img class="over" src="${row.full}" alt="${row.name} jak do tej pory" loading="lazy"
              style="filter:${row.previous.css}"></div></figure>
     <figure class="now"><figcaption>${row.kind === 'white'
-      ? 'teraz &mdash; bia&#322;e cyfry z czarn&#261; obw&oacute;dk&#261;, dwa razy wi&#281;ksze, g&#322;adkie linie'
+      ? 'teraz &mdash; lite bia&#322;e cyfry z czarn&#261; obw&oacute;dk&#261;, dwa razy wi&#281;ksze'
       : row.kind === 'names'
-        ? 'teraz &mdash; bia&#322;e nazwy z obw&oacute;dk&#261;, obszary i linie jak w us&#322;udze'
+        ? 'teraz &mdash; bia&#322;e nazwy, ich halo staje si&#281; czarn&#261; obw&oacute;dk&#261;'
         : 'teraz &mdash; rysunek bez przerabiania'}</figcaption>
       <div class="stage"${row.bg ? ` style="background-image:url('${row.bg}')"` : ''}>
         <img class="over" src="${row.url}" alt="${row.name} jak teraz" loading="lazy"

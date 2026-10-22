@@ -106,66 +106,93 @@ module.exports = async function layers(report) {
     const row = values.slice(15, 18);                      // the alpha row: R, G, B
     return { luminance: row, intercept: values[19] };
   };
-  report.check('the ink is keyed on darkness, so a white plate under the digits is not ink',
+  const zoom = env.internals.LABEL_MAGNIFY;
+  const merged = filter => [...filter.querySelectorAll('feMergeNode')].map(node => node.getAttribute('in'));
+  const plateOpening = ink ? [...ink.querySelectorAll('feMorphology')]
+    .filter(m => m.getAttribute('operator') === 'erode' || (m.getAttribute('operator') === 'dilate' &&
+      m.getAttribute('result') === 'field')) : [];
+  report.check('every length of the filters is a length of the drawing, counted in the element\'s pixels',
+    !!ink && !!namesInk && zoom > 1 && plateOpening.length === 2 &&
+    [...plateOpening].every(m => Number(m.getAttribute('radius')) === 8 * zoom) &&
+    // the black casing is one pixel of the drawing, i.e. zoom pixels of the element - the
+    // browser filters the image at the size it lays it out, not at the bitmap's own size
+    [ink, namesInk].every(filter => [...filter.querySelectorAll('feMorphology')]
+      .some(m => m.getAttribute('operator') === 'dilate' && m.getAttribute('result') === 'grown' &&
+        Number(m.getAttribute('radius')) === zoom)),
+    `the casing and the plate opening are multiplied by LABEL_MAGNIFY (${zoom})`);
+  // Round 31: the ink of a parcel number is the drawing's coverage - the whole silhouette
+  // the service drew - minus a white plate, which is the one opaque thing that is not a
+  // letter. A key on darkness alone gives the one pixel dark outline of the digits, i.e.
+  // the hollow grey skeleton of the report.
+  report.check('a parcel number is inked from its whole silhouette, and a white plate is not ink',
     (() => {
-      const key = luminanceKey(ink);
-      if (!key) return false;
-      const alphaOf = v => (key.luminance[0] + key.luminance[1] + key.luminance[2]) * v + key.intercept;
-      // values are normalised: white (1.0) -> 0, a dark digit (0.16) -> about 0.84
-      return Math.abs(alphaOf(1)) < 0.02 &&
-        Math.abs(key.luminance[0] - (-0.299)) < 1e-6 &&
-        Math.abs(key.luminance[1] - (-0.587)) < 1e-6 &&
-        Math.abs(key.luminance[2] - (-0.114)) < 1e-6 &&
-        alphaOf(0.16) > 0.6;
+      if (!ink) return false;
+      const notInk = filter => [...filter.querySelectorAll('feComposite')]
+        .some(c => c.getAttribute('operator') === 'out' && c.getAttribute('in2') === 'plate');
+      const plate = [...ink.querySelectorAll('feComposite')]
+        .find(c => c.getAttribute('result') === 'plate');
+      const inverse = [...ink.querySelectorAll('feComponentTransfer')]
+        .find(t => t.getAttribute('result') === 'notdark');
+      const table = inverse && inverse.querySelector('feFuncA')?.getAttribute('tableValues');
+      const cover = [...ink.querySelectorAll('feComponentTransfer')]
+        .find(t => t.getAttribute('result') === 'cov');
+      const cut = cover ? -Number(cover.querySelector('feFuncA').getAttribute('intercept')) /
+        Number(cover.querySelector('feFuncA').getAttribute('slope')) : NaN;
+      // the plate is the large opaque field of the drawing that is not dark: the digits on
+      // it stay ink, the field around them does not
+      return notInk(ink) && !!plate && plate.getAttribute('operator') === 'in' &&
+        (table || '').trim() === '1 0' && Math.abs(cut - 0.5) < 0.1 &&
+        !ink.querySelector('feColorMatrix[result="letters"]');
     })(),
-    'feColorMatrix alpha = -0.299R - 0.587G - 0.114B + 1, masked by the drawing');
-  // Round 30: two branches out of the same key. The letters take the middle of their
-  // smoothed edge and the parcel lines take a shallow transfer, because a one pixel line
-  // has no plateau to cut: a hard cut either kills it or leaves its staircase.
-  report.check('the parcel numbers are smoothed hard enough to lose the two-pixel steps',
+    'coverage (opaque at half) minus the opening of the coverage where the drawing is bright');
+  report.check('the drawing under the ink is kept - blurred - and the casing sits between it and the white',
     (() => {
-      const blurs = ink ? [...ink.querySelectorAll('feGaussianBlur')] : [];
-      const transfers = ink ? [...ink.querySelectorAll('feFuncA')] : [];
-      if (blurs.length < 2 || transfers.length < 2) return false;
-      const letters = blurs[0], lines = blurs[1];
-      const slopeOf = t => Number(t.getAttribute('slope'));
-      const cutOf = t => -Number(t.getAttribute('intercept')) / slopeOf(t);
-      return ink.firstElementChild?.tagName === 'feColorMatrix' &&
-        Number(letters.getAttribute('stdDeviation')) >= 1 &&
-        Number(letters.getAttribute('stdDeviation')) <= 1.6 &&
-        Number(lines.getAttribute('stdDeviation')) >= 0.6 &&
-        slopeOf(transfers[0]) >= 4 && cutOf(transfers[0]) > 0.3 && cutOf(transfers[0]) < 0.6 &&
-        // the line branch is shallow on purpose: it keeps the line, without a cut
-        slopeOf(transfers[1]) <= 4 && cutOf(transfers[1]) < 0.2;
+      if (!ink) return false;
+      const order = merged(ink);
+      const blur = ink.querySelector('feGaussianBlur');
+      // the service's raster is two screen pixels per pixel: half a pixel of blur is what
+      // takes the steps out of the boundary lines without a threshold cutting them away
+      return !!blur && Number(blur.getAttribute('stdDeviation')) > 0 &&
+        Number(blur.getAttribute('stdDeviation')) <= 2 * zoom &&
+        order.length === 3 && order[0] === 'draw' && order[1] === 'casing' && order[2] === 'whiteink';
     })(),
-    'letters: a 1-1.6 px blur and a cut at 0.3-0.6; lines: a second blur and a shallow transfer');
-  report.check('the boundary names are keyed on the coverage of the drawing, not on its colour',
+    'blurred SourceGraphic, then the casing, then the white ink');
+  // Round 31: the boundary layers draw dark names on a fat white halo. The halo is what
+  // merged the letters into one white bar; painting it black makes it the casing of the
+  // letters instead, and the letters themselves are the dark ink grown by a pixel.
+  report.check('the names are the dark ink, and their white halo becomes their black casing',
     (() => {
       if (!namesInk) return false;
-      const key = namesInk.querySelector('feComponentTransfer[in="SourceAlpha"] feFuncA');
-      const erode = namesInk.querySelector('feMorphology[operator="erode"]');
-      const dilate = namesInk.querySelector('feMorphology[operator="dilate"][radius="1"]');
-      const cut = key ? -Number(key.getAttribute('intercept')) / Number(key.getAttribute('slope')) : NaN;
-      // the names are the only opaque ink of that drawing; the one pixel boundary lines
-      // are removed by an opening (erode then dilate)
-      return !!key && Math.abs(cut - 0.5) < 0.15 && !!erode && !!dilate &&
-        namesInk.querySelector('feMergeNode[in="SourceGraphic"]') !== null &&
-        !namesInk.querySelector('feColorMatrix');
+      const dark = [...namesInk.querySelectorAll('feComponentTransfer')]
+        .find(t => t.getAttribute('result') === 'darkbin');
+      const notLabels = [...namesInk.querySelectorAll('feComponentTransfer')]
+        .find(t => t.getAttribute('result') === 'notlabels');
+      const label = [...namesInk.querySelectorAll('feComposite')]
+        .find(c => c.getAttribute('result') === 'labels');
+      const halo = [...namesInk.querySelectorAll('feComposite')]
+        .find(c => c.getAttribute('result') === 'halo');
+      const areas = [...namesInk.querySelectorAll('feComposite')]
+        .find(c => c.getAttribute('result') === 'areas');
+      const order = merged(namesInk);
+      return !!dark && !!notLabels && !!label && !!halo && !!areas &&
+        label.getAttribute('operator') === 'in' && label.getAttribute('in2') === 'fat' &&
+        halo.getAttribute('operator') === 'in' && halo.getAttribute('in') === 'cov' &&
+        areas.getAttribute('operator') === 'out' && areas.getAttribute('in2') === 'cov' &&
+        order.includes('halo') && order[order.length - 1] === 'whiteink' &&
+        order.indexOf('halo') > order.indexOf('casing');
     })(),
-    'alpha >= half, one pixel of erosion removes the lines, the drawing itself is merged back');
-  report.check('both masks end in solid white with one pixel of black casing under them',
+    'letters from the dark key grown by one pixel, halo = coverage minus letters, drawn black');
+  report.check('both masks end in solid white with one drawing pixel of black casing under them',
     !!ink && !!namesInk &&
     [ink, namesInk].every(filter =>
       filter.querySelector('feFlood[flood-color="#fff"]') !== null &&
       filter.querySelector('feFlood[flood-color="#000"]') !== null &&
-      [...filter.querySelectorAll('feMorphology')]
-        .some(m => m.getAttribute('operator') === 'dilate' && m.getAttribute('radius') === '1')) &&
-    [ink, namesInk].every(filter => {
-      const order = [...filter.querySelectorAll('feMergeNode')].map(node => node.getAttribute('in'));
-      return order[order.length - 1] === 'whiteink' && order.includes('casing') &&
-        (filter === ink || order[0] === 'SourceGraphic');
-    }),
-    'a white flood masked by the mask, and a one pixel dilate under it');
+      // the white is a flood masked by the mask itself: a letter is 255 white from edge to
+      // edge, not the grey ramp of a blurred threshold
+      [...filter.querySelectorAll('feComposite')]
+        .some(c => c.getAttribute('in') === 'white' && c.getAttribute('operator') === 'in')) &&
+    [ink, namesInk].every(filter => merged(filter).includes('casing')),
+    'a white flood masked by the mask, and the casing grown from the same mask');
   const group = ['Geoportal - podział adm', 'Geoportal - Miasta', 'Geoportal - gminy',
     'Geoportal - powiaty', 'Geoportal - województwa', 'Geoportal - Granica PL'];
   report.check('every drawing of the administrative group is white ink, drawn twice the size in one image per window',

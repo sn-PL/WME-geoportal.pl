@@ -23,7 +23,7 @@
  */
 
 /* Changelog:
- *  1.6.0 - OSM, the standard photo layer, the level crossings and the topographic objects come as tiles of the editor's own map, because those services refuse a whole-window picture; the parcels, the addresses and the boundaries are tiles of that map too, so a pan inside the margin of the tiles asks for nothing at all and a longer one only for the strip it uncovers; the crossings and the detailed BDOT switches ask in EPSG:2180, the system those services draw in - asked in 4326 they answer with a picture of their own error instead of the data (drawn into the image, because OpenLayers asks a WMS for INIMAGE exceptions); every service is now asked for its errors as documents instead of pictures, so a failure leaves a hole in the layer instead of a grey plate of text on the map; the six drawings of the administrative group are asked for in cells of 2048 px of map at half their pixels, so the service draws their letters twice as large and a window of the editor's size is one image of the service, laid out in one pass; two SVG filters key their ink and paint it solid white with a one pixel black casing: the parcel numbers are keyed on darkness (a number is dark digits on a white plate, so an alpha-only whitening turned the pair into one white blob - the report of 10.2026) and only the digits come through, while the names of the boundary layers are keyed on the drawing's own coverage and an opening that removes everything one pixel wide, so the names become white and the translucent coloured areas and boundary lines stay exactly as the service drew them; both keys are blurred before a short transfer, which turns the doubled raster's two pixel steps into a smooth contour, and the drawing's one pixel lines go through a second, shallower branch of the filter - a line has no plateau to cut, so it is left soft and anti-aliased instead of stepped; the addresses, the streets, the places, the crossings and the topographic objects are shown exactly as the service draws them, without a filter and at one image pixel per pixel of the map, because those drawings cannot be recoloured without losing them - a street is a wide translucent surface, which any whitening paints over the photo as a white band; the road network and the BDOT surfaces, whose colour is the map itself, are lifted under a thin white edge; a view picture is never asked for past about a megapixel, a refused image is asked for again after a moment, the drawing of the view a layer has delivered stays on the map only for as long as that view is the one being asked for (OpenLayers used to keep it beside the new one, at the offset of the pan, which is what doubled the parcel numbers and the names), it is never carried through a zoom, and a setting that cannot be read no longer stops the script.
+ *  1.6.0 - OSM, the standard photo layer, the level crossings and the topographic objects come as tiles of the editor's own map, because those services refuse a whole-window picture; the parcels, the addresses and the boundaries are tiles of that map too, so a pan inside the margin of the tiles asks for nothing at all and a longer one only for the strip it uncovers; the crossings and the detailed BDOT switches ask in EPSG:2180, the system those services draw in - asked in 4326 they answer with a picture of their own error instead of the data (drawn into the image, because OpenLayers asks a WMS for INIMAGE exceptions); every service is now asked for its errors as documents instead of pictures, so a failure leaves a hole in the layer instead of a grey plate of text on the map; the six drawings of the administrative group are asked for in cells of 2048 px of map at half their pixels, so the service draws their letters twice as large and a window of the editor's size is one image of the service, laid out in one pass; two SVG filters paint their ink solid white under a one pixel black casing, and every length of them is multiplied by the two that the image is laid out bigger than the bitmap of the service - a filter counts in the element\'s pixels, so the blur and the casing of the round before were half of what they were designed to be, which is why the letters stayed ragged; the ink of a parcel number is the whole silhouette the service drew, because the number is white digits with a one pixel dark outline and a key on darkness alone returned that outline only, i.e. the hollow grey skeleton of the report of 10.2026, while the large flat white plate a number may be drawn on is the one opaque thing kept out of the ink so that its dark digits get the casing and stay visible; the names of the boundary layers are dark ink on a fat white halo, so the letters are the dark key grown by a pixel and the halo is painted black - it becomes the casing of the letters instead of the white bar that swallowed them - while the translucent coloured areas keep their colour and their alpha and the boundary lines are white with the ink; the rest of those drawings is kept and blurred by half a pixel, which takes the two pixel steps out of the raster without a threshold cutting the thin lines away; the addresses, the streets, the places, the crossings and the topographic objects are shown exactly as the service draws them, without a filter and at one image pixel per pixel of the map, because those drawings cannot be recoloured without losing them - a street is a wide translucent surface, which any whitening paints over the photo as a white band; the road network and the BDOT surfaces, whose colour is the map itself, are lifted under a thin white edge; a view picture is never asked for past about a megapixel, a refused image is asked for again after a moment, the drawing of the view a layer has delivered stays on the map only for as long as that view is the one being asked for (OpenLayers used to keep it beside the new one, at the offset of the pan, which is what doubled the parcel numbers and the names), it is never carried through a zoom, and a setting that cannot be read no longer stops the script.
  *  1.5.5 - WME SDK v2.374: async SDK mode; version-tolerant startup, events, zoom filtering and controls; photo layers request JPEG without the needless transparency flag, as one image per view instead of a tile grid (the ortho WMS answers whole tile batches with 404); a refused image is requested three times - once immediately, then twice at a growing distance - and a view image that OpenLayers gave up on is requested again instead of leaving the map empty.
  *  1.5.4 - Use SDK readiness, state and events; guard WMS and preserve the Layers menu.
  *  1.5.2 - New layer names address, streets WMS endpoint
@@ -138,20 +138,40 @@
   // screen pixels, and a blur turns each step into a ramp whose middle the transfer cuts
   // through, i.e. a smooth contour.
   //
-  // The key of the parcels is darkness: a parcel number is dark digits on a white plate,
-  // so 1 - luminance selects the digits and leaves the plate alone (the alpha-only
-  // whitening of the earlier rounds turned both into one white blob). The blur of 1.25 px
-  // is wide enough to smooth a two-pixel staircase but narrow enough to be survived by the
-  // drawing's own one pixel lines - and whatever the smoothing does lose of those lines is
-  // put back by the second branch below (`lost`), because the parcel boundaries are the
-  // other half of that layer.
+  // How much smaller than the drawing the image asked for is, i.e. how many times the
+  // service's letters end up bigger than they were rasterised. Two - the letters of
+  // those drawings are five to eight pixels tall at their own size.
+  const LABEL_MAGNIFY = 2;
+  // Every length of the filters is a length of the drawing, and this is the only place it
+  // turns into what a filter primitive counts in: the element's own pixels. The browser
+  // filters the image at the size it lays it out - LABEL_MAGNIFY times the bitmap the
+  // service answered with - so one drawing pixel is LABEL_MAGNIFY of them. Without this
+  // factor every blur was half as wide as designed and every casing half as thick, which
+  // is why the smoothing of the round before could not be seen.
+  const Z = (n) => n * LABEL_MAGNIFY;
   const LABEL_KEY =
     '<feColorMatrix in="SourceGraphic" type="matrix" result="key" ' +
     'values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  -0.299 -0.587 -0.114 0 1"/>' +
-    '<feComposite in="key" in2="SourceGraphic" operator="in" result="dark"/>';
-  // The same ending for both filters: white ink and the black casing, merged.
+    '<feComposite in="key" in2="SourceGraphic" operator="in" result="dark"/>' +
+    // the dark part of the drawing, hard: below a third of the way to black it is ink
+    '<feComponentTransfer in="dark" result="darkbin">' +
+    '<feFuncA type="linear" slope="10" intercept="-3"/>' +
+    '</feComponentTransfer>' +
+    // the coverage of the drawing: which pixels are opaque at all. The translucent areas
+    // of the boundary layers are around 43 % alpha, so the cut sits at a half.
+    '<feComponentTransfer in="SourceAlpha" result="cov">' +
+    '<feFuncA type="linear" slope="20" intercept="-10"/>' +
+    '</feComponentTransfer>' +
+    '<feComponentTransfer in="darkbin" result="notdark">' +
+    '<feFuncA type="table" tableValues="1 0"/>' +
+    '</feComponentTransfer>';
+  // The ending of both filters: the ink painted solid white and one pixel of black casing
+  // grown from the same mask and laid under it, because a white letter over a pale meadow,
+  // a concrete roof or a white plate is otherwise invisible. The white is a flood masked
+  // by the mask itself, so a letter is 255 white from edge to edge - the grey letters of
+  // the round before were the mask's soft edge showing through.
   const LABEL_INK = (mask) =>
-    `<feMorphology in="${mask}" operator="dilate" radius="1" result="grown"/>` +
+    `<feMorphology in="${mask}" operator="dilate" radius="${Z(1)}" result="grown"/>` +
     '<feFlood flood-color="#000" result="black"/>' +
     '<feComposite in="black" in2="grown" operator="in" result="casing"/>' +
     '<feFlood flood-color="#fff" result="white"/>' +
@@ -160,59 +180,57 @@
     '<svg id="geoportal-label-filters" width="0" height="0" ' +
     'style="position:absolute;left:0;top:0;pointer-events:none">' +
     '<defs>' +
-    // the parcel numbers and the parcel boundaries
+    // The parcel numbers. Their ink is not what the earlier rounds took for it: at the
+    // size the service rasters them a number is white digits drawn with a one pixel dark
+    // outline, so a key on darkness alone returned the outline only and the number came
+    // out as a hollow grey skeleton (the report of 10.2026 - "the captions are grey now
+    // and less visible than the white ones of the round before"). What is ink here is the
+    // drawing's coverage, i.e. the whole silhouette the service drew, minus the one thing
+    // that is opaque but is not a letter: a white plate a number may be drawn on.
     '<filter id="geoportal-labels-ink" x="-20%" y="-20%" width="140%" height="140%" ' +
     'color-interpolation-filters="sRGB">' +
     LABEL_KEY +
-    '<feGaussianBlur in="dark" stdDeviation="1.25" result="soft"/>' +
-    // the letters: the middle of their smoothed edge
-    '<feComponentTransfer in="soft" result="ink">' +
-    '<feFuncA type="linear" slope="12" intercept="-5.4"/>' +
-    '</feComponentTransfer>' +
-    // the one pixel lines of the drawing: a line has neither a plateau nor a step - after
-    // the blur its peak is a fraction of a letter's, and the only way to keep it while its
-    // staircase goes is to leave it soft: a second blur and a shallow transfer (slope 2.5)
-    // instead of a cut, so the boundary is a continuous anti-aliased line and not a chain
-    // of two-pixel steps. Added to the letters, then all of it white under one casing.
-    '<feGaussianBlur in="dark" stdDeviation="0.9" result="linesoft"/>' +
-    '<feComponentTransfer in="linesoft" result="lines">' +
-    '<feFuncA type="linear" slope="3.5" intercept="-0.5"/>' +
-    '</feComponentTransfer>' +
-    '<feComposite in="ink" in2="lines" operator="arithmetic" k2="1" k3="1" result="labels"/>' +
+    // A plate is a hundred pixels wide and flat; letters are thin. An opening wide enough
+    // to keep only the plate, minus its dark digits, is what the ink must not cover -
+    // otherwise the plate would be painted white as one field and its digits with it.
+    `<feMorphology in="cov" operator="erode" radius="${Z(8)}" result="core"/>` +
+    `<feMorphology in="core" operator="dilate" radius="${Z(8)}" result="field"/>` +
+    '<feComposite in="field" in2="notdark" operator="in" result="plate"/>' +
+    '<feComposite in="cov" in2="plate" operator="out" result="labels"/>' +
     LABEL_INK('labels') +
-    '<feMerge><feMergeNode in="casing"/><feMergeNode in="whiteink"/></feMerge>' +
-    '</filter>' +
-    // the names of the boundary layers: white on pale, translucent areas. The names are the
-    // only opaque ink of that drawing (the areas are translucent, the lines are one pixel),
-    // so the key is the drawing's own coverage - alpha >= a half - and everything else of
-    // the drawing is left exactly as the service drew it: the coloured areas keep their
-    // translucency, the boundary lines keep their colour, and the names become solid white
-    // with the same one pixel of black casing.
-    '<filter id="geoportal-labels-names" x="-20%" y="-20%" width="140%" height="140%" ' +
-    'color-interpolation-filters="sRGB">' +
-    '<feComponentTransfer in="SourceAlpha" result="key">' +
-    '<feFuncA type="linear" slope="20" intercept="-10"/>' +
-    '</feComponentTransfer>' +
-    // the boundary lines of that drawing are opaque too, and one pixel wide: an opening
-    // (erode, then dilate) removes everything thinner than a couple of pixels, so only the
-    // letters are left; the closing after it restores the letters' own width.
-    '<feMorphology in="key" operator="erode" radius="1" result="thin"/>' +
-    '<feMorphology in="thin" operator="dilate" radius="1" result="letters"/>' +
-    '<feGaussianBlur in="letters" stdDeviation="0.8" result="soft"/>' +
-    '<feComponentTransfer in="soft" result="names">' +
-    '<feFuncA type="linear" slope="8" intercept="-3.2"/>' +
-    '</feComponentTransfer>' +
-    LABEL_INK('names') +
-    // the drawing itself first: the translucent areas and the boundary lines stay as the
-    // service drew them, the names go solid white on top of them
-    '<feMerge><feMergeNode in="SourceGraphic"/><feMergeNode in="casing"/>' +
+    // Everything else of that drawing - the plates, the boundary lines - is blurred by
+    // less than a pixel: it is a raster of two screen pixels per pixel, and the blur is
+    // what turns its steps into a line without a threshold cutting the thin ones away.
+    `<feGaussianBlur in="SourceGraphic" stdDeviation="${Z(0.8)}" result="draw"/>` +
+    '<feMerge><feMergeNode in="draw"/><feMergeNode in="casing"/>' +
     '<feMergeNode in="whiteink"/></feMerge>' +
     '</filter>' +
+    // The names of the boundary layers. Those drawings are dark names with a fat white
+    // halo over pale, translucent areas - the halo is what merges the letters into one
+    // white bar when the coverage alone is painted (the second half of the report), and
+    // what makes white names over it invisible when only the dark ink is painted (the
+    // first half). So the letters are the dark ink grown by a pixel, and everything
+    // opaque that is not a letter is painted black: the halo becomes the casing of the
+    // letters instead of a white field around them. Erasing the halo is not an option -
+    // it covers the translucent area, and cutting it out leaves a hole in that area.
+    '<filter id="geoportal-labels-names" x="-20%" y="-20%" width="140%" height="140%" ' +
+    'color-interpolation-filters="sRGB">' +
+    LABEL_KEY +
+    `<feMorphology in="darkbin" operator="dilate" radius="${Z(1)}" result="fat"/>` +
+    '<feComposite in="cov" in2="fat" operator="in" result="labels"/>' +
+    '<feComponentTransfer in="labels" result="notlabels">' +
+    '<feFuncA type="table" tableValues="1 0"/>' +
+    '</feComponentTransfer>' +
+    '<feComposite in="cov" in2="notlabels" operator="in" result="halo"/>' +
+    LABEL_INK('labels') +
+    // only the translucent part of the drawing survives: the areas keep their colour and
+    // their alpha, the boundary lines are white with the rest of the ink, the halo is
+    // the black of the casing
+    '<feComposite in="SourceGraphic" in2="cov" operator="out" result="areas"/>' +
+    '<feMerge><feMergeNode in="areas"/><feMergeNode in="casing"/>' +
+    '<feMergeNode in="halo"/><feMergeNode in="whiteink"/></feMerge>' +
+    '</filter>' +
     '</defs></svg>';
-  // How much smaller than the drawing the image asked for is, i.e. how many times the
-  // service's letters end up bigger than they were rasterised. Two - the letters of
-  // those drawings are five to eight pixels tall at their own size.
-  const LABEL_MAGNIFY = 2;
   // The cell of the map such a drawing is asked for in. A service draws its labels into
   // the image it is asked for and knows nothing outside it, so a view built from many
   // small images gets every name as many times as there are images over it, and two
