@@ -119,48 +119,53 @@ module.exports = async function layers(report) {
         alphaOf(0.16) > 0.6;
     })(),
     'feColorMatrix alpha = -0.299R - 0.587G - 0.114B + 1, masked by the drawing');
-  report.check('the parcel numbers are smoothed hard enough to lose the two-pixel steps, and a one pixel line survives',
+  // Round 30: two branches out of the same key. The letters take the middle of their
+  // smoothed edge and the parcel lines take a shallow transfer, because a one pixel line
+  // has no plateau to cut: a hard cut either kills it or leaves its staircase.
+  report.check('the parcel numbers are smoothed hard enough to lose the two-pixel steps',
     (() => {
-      const blur = ink && ink.querySelector('feGaussianBlur');
-      const transfer = ink && ink.querySelector('feFuncA');
-      if (!blur || !transfer) return false;
-      const sigma = Number(blur.getAttribute('stdDeviation'));
-      const slope = Number(transfer.getAttribute('slope'));
-      const cut = -Number(transfer.getAttribute('intercept')) / slope;
-      const order = ink.firstElementChild?.tagName === 'feColorMatrix' &&
-        blur.nextElementSibling?.tagName === 'feComponentTransfer';
-      // a one pixel line of the key peaks at erf(0.5 / (sigma * sqrt2)) after the blur
-      const erf = x => {
-        const t = 1 / (1 + 0.3275911 * Math.abs(x));
-        const y = 1 - ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
-        return x >= 0 ? y : -y;
-      };
-      const peak = erf(0.5 / (sigma * Math.SQRT2));
-      return Number.isFinite(sigma) && sigma >= 0.6 && sigma <= 1.2 &&
-        order && slope >= 4 && cut > 0.1 && cut < 0.3 && peak > cut + 0.2;
+      const blurs = ink ? [...ink.querySelectorAll('feGaussianBlur')] : [];
+      const transfers = ink ? [...ink.querySelectorAll('feFuncA')] : [];
+      if (blurs.length < 2 || transfers.length < 2) return false;
+      const letters = blurs[0], lines = blurs[1];
+      const slopeOf = t => Number(t.getAttribute('slope'));
+      const cutOf = t => -Number(t.getAttribute('intercept')) / slopeOf(t);
+      return ink.firstElementChild?.tagName === 'feColorMatrix' &&
+        Number(letters.getAttribute('stdDeviation')) >= 1 &&
+        Number(letters.getAttribute('stdDeviation')) <= 1.6 &&
+        Number(lines.getAttribute('stdDeviation')) >= 0.6 &&
+        slopeOf(transfers[0]) >= 4 && cutOf(transfers[0]) > 0.3 && cutOf(transfers[0]) < 0.6 &&
+        // the line branch is shallow on purpose: it keeps the line, without a cut
+        slopeOf(transfers[1]) <= 4 && cutOf(transfers[1]) < 0.2;
     })(),
-    'a blur of 0.6-1.2 px in front of a short transfer, and a one pixel line still crosses it');
-  report.check('the pale names of the boundary layers take the same key with a cut down at their own brightness',
+    'letters: a 1-1.6 px blur and a cut at 0.3-0.6; lines: a second blur and a shallow transfer');
+  report.check('the boundary names are keyed on the coverage of the drawing, not on its colour',
     (() => {
-      const key = luminanceKey(namesInk);
-      const transfer = namesInk && namesInk.querySelector('feFuncA');
-      if (!key || !transfer) return false;
-      const slope = Number(transfer.getAttribute('slope'));
-      const cut = -Number(transfer.getAttribute('intercept')) / slope;
-      const keyOf = v => (key.luminance[0] + key.luminance[1] + key.luminance[2]) * v + key.intercept;
-      const outOf = v => slope * keyOf(v) + Number(transfer.getAttribute('intercept'));
-      // measured on the service's drawing: names 230, 217, 231 on a plate of 250, 248, 251
-      return namesInk.querySelector('feGaussianBlur') !== null &&
-        cut < 0.08 && outOf(0.9) > 0.6 && outOf(0.975) <= 0;
+      if (!namesInk) return false;
+      const key = namesInk.querySelector('feComponentTransfer[in="SourceAlpha"] feFuncA');
+      const erode = namesInk.querySelector('feMorphology[operator="erode"]');
+      const dilate = namesInk.querySelector('feMorphology[operator="dilate"][radius="1"]');
+      const cut = key ? -Number(key.getAttribute('intercept')) / Number(key.getAttribute('slope')) : NaN;
+      // the names are the only opaque ink of that drawing; the one pixel boundary lines
+      // are removed by an opening (erode then dilate)
+      return !!key && Math.abs(cut - 0.5) < 0.15 && !!erode && !!dilate &&
+        namesInk.querySelector('feMergeNode[in="SourceGraphic"]') !== null &&
+        !namesInk.querySelector('feColorMatrix');
     })(),
-    'names at about 0.9 of white become ink, their plate at 0.975 does not');
-  report.check('the letters are plain white: no casing is grown under them',
+    'alpha >= half, one pixel of erosion removes the lines, the drawing itself is merged back');
+  report.check('both masks end in solid white with one pixel of black casing under them',
     !!ink && !!namesInk &&
-    ink.querySelector('feFlood[flood-color="#fff"]') !== null &&
-    !ink.querySelector('feMorphology') && !ink.querySelector('feFlood[flood-color="#000"]') &&
-    !namesInk.querySelector('feMorphology') &&
-    /<feComposite in="white" in2="ink" operator="in"\/>/.test(env.internals.CONTRAST_SVG),
-    'a white flood masked by the ink, and nothing else');
+    [ink, namesInk].every(filter =>
+      filter.querySelector('feFlood[flood-color="#fff"]') !== null &&
+      filter.querySelector('feFlood[flood-color="#000"]') !== null &&
+      [...filter.querySelectorAll('feMorphology')]
+        .some(m => m.getAttribute('operator') === 'dilate' && m.getAttribute('radius') === '1')) &&
+    [ink, namesInk].every(filter => {
+      const order = [...filter.querySelectorAll('feMergeNode')].map(node => node.getAttribute('in'));
+      return order[order.length - 1] === 'whiteink' && order.includes('casing') &&
+        (filter === ink || order[0] === 'SourceGraphic');
+    }),
+    'a white flood masked by the mask, and a one pixel dilate under it');
   const group = ['Geoportal - podział adm', 'Geoportal - Miasta', 'Geoportal - gminy',
     'Geoportal - powiaty', 'Geoportal - województwa', 'Geoportal - Granica PL'];
   report.check('every drawing of the administrative group is white ink, drawn twice the size in one image per window',
