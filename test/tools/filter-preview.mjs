@@ -170,8 +170,10 @@ const html = `<!doctype html>
 ${svg}
 <svg id="geoportal-previous-filter" width="0" height="0" style="position:absolute;left:0;top:0;pointer-events:none">
   <defs><filter id="geoportal-previous" x="-20%" y="-20%" width="140%" height="140%"
-    color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="0.8" result="soft"/><feComponentTransfer in="soft" result="ink"><feFuncA type="linear" slope="20"
-    intercept="-8.5"/></feComponentTransfer><feMorphology in="ink" operator="dilate" radius="1"
+    color-interpolation-filters="sRGB"><feFlood flood-color="#fff" result="w"/>
+    <feComposite in="w" in2="SourceGraphic" operator="in" result="white"/>
+    <feComponentTransfer in="white" result="ink"><feFuncA type="linear" slope="8"
+    intercept="-3.4"/></feComponentTransfer><feMorphology in="ink" operator="dilate" radius="1"
     result="grown"/><feFlood flood-color="#000" result="black"/><feComposite in="black" in2="grown"
     operator="in" result="casing"/><feMerge><feMergeNode in="casing"/><feMergeNode in="ink"/></feMerge></filter></defs>
 </svg>
