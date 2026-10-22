@@ -98,18 +98,18 @@ for (const name of SHOW) {
   // The same cell with the pixels the map draws it with: that is the drawing of the
   // previous rounds, at one pixel per pixel.
   const full = withSize(url, Number(query.WIDTH) * 2, Number(query.HEIGHT) * 2);
-  // What the middle column shows: for the drawing whose ink the script re-colours (the
-  // parcel numbers) the chain of rounds 23-27 - the whole drawing made white from its
-  // coverage alone, which is the unreadable white plate of the round-28 report. For
-  // every drawing the script leaves alone it shows the same treatment the script uses,
-  // and says so.
+  // What the middle column shows: for the drawings the script re-colours, what the
+  // previous rounds did - the round 23-27 coverage-keyed white (the unreadable white
+  // plate of the round-28 report) for the parcel numbers, and the plain casing of
+  // rounds 24-29 for the boundary layers whose names were never re-coloured. For every
+  // drawing the script leaves alone it shows the same treatment the script uses.
   const previous = kind === 'white'
     ? { css: 'brightness(0) invert(1) url(#geoportal-previous)', caption: 'poprzednio (rundy 23-27) &mdash; bielenie po kryciu: tabliczka i cyfry w jedn&#261; bia&#322;&#261; plam&#281;' }
-    : kind
-      ? { css: filters[kind], caption: kind === 'outline'
-          ? 'bez zmian od rundy 24 &mdash; rysunek us&#322;ugi + obw&oacute;dka'
-          : 'bez zmian od rundy 20 &mdash; rozja&#347;nienie i bia&#322;a kraw&#281;d&#378;' }
-      : { css: 'none', caption: 'od rundy 28: dok&#322;adnie rysunek us&#322;ugi, bez filtra' };
+    : kind === 'names'
+      ? { css: 'brightness(0) invert(1) url(#geoportal-previous)', caption: 'poprzednio (rundy 24-29) &mdash; rysunek us&#322;ugi + czarna obw&oacute;dka' }
+      : kind
+        ? { css: filters[kind], caption: 'bez zmian od rundy 20 &mdash; rozja&#347;nienie i bia&#322;a kraw&#281;d&#378;' }
+        : { css: 'none', caption: 'od rundy 28: dok&#322;adnie rysunek us&#322;ugi, bez filtra' };
   rows.push({
     name: name.replace('Geoportal - ', ''),
     kind,
@@ -191,10 +191,10 @@ ${svg}
   <label>powi&#281;kszenie ramki <input id="z" type="range" min="1" max="3" step="1" value="2">
     <code id="zx">2&times;</code></label>
   <div class="note">Trzecia kolumna u&#380;ywa filtr&oacute;w, kt&oacute;re skrypt ma teraz:
-    <code>white</code> (numery dzia&#322;ek: klucz po ciemno&#347;ci, bia&#322;y atrament
-    z czarn&#261; obw&oacute;dk&#261;, obraz z kom&oacute;rki 2048 px w po&#322;owie
-    pikseli, wi&#281;c litery s&#261; dwa razy wi&#281;ksze), <code>outline</code>
-    (warstwy granic: <b>rysunek us&#322;ugi bez zmian</b> + obw&oacute;dka),
+    <code>white</code> (numery dzia&#322;ek) i <code>names</code> (nazwy granic):
+    klucz po ciemno&#347;ci, czysto bia&#322;y atrament bez obw&oacute;dki, obraz
+    z kom&oacute;rki 2048 px w po&#322;owie pikseli, wi&#281;c litery s&#261; dwa razy
+    wi&#281;ksze, a tabliczki i kolorowe obszary zostaj&#261; jak w us&#322;udze,
     <code>dark</code> i <code>colour</code> (drogi, BDOT: rozja&#347;nienie) &mdash;
     a adresy, ulice, place, przejazdy i obiekty topograficzne <b>nie maj&#261;
     &#380;adnego filtra</b>. Rundy 23&ndash;27 bieli&#322;y ca&#322;y rysunek po kryciu
@@ -212,8 +212,10 @@ ${rows.map(row => `<div class="row">
         <img class="over" src="${row.full}" alt="${row.name} jak do tej pory" loading="lazy"
              style="filter:${row.previous.css}"></div></figure>
     <figure class="now"><figcaption>${row.kind === 'white'
-      ? 'teraz &mdash; klucz po ciemno&#347;ci: cyfry bia&#322;e, dwa razy wi&#281;ksze, tabliczka jak w us&#322;udze'
-      : 'teraz &mdash; rysunek bez przerabiania'}</figcaption>
+      ? 'teraz &mdash; klucz po ciemno&#347;ci: czysto bia&#322;e cyfry, dwa razy wi&#281;ksze, bez obw&oacute;dki'
+      : row.kind === 'names'
+        ? 'teraz &mdash; czysto bia&#322;e nazwy, obszary i linie jak w us&#322;udze'
+        : 'teraz &mdash; rysunek bez przerabiania'}</figcaption>
       <div class="stage"${row.bg ? ` style="background-image:url('${row.bg}')"` : ''}>
         <img class="over" src="${row.url}" alt="${row.name} jak teraz" loading="lazy"
              style="filter:${row.kind ? filter[row.kind] : 'none'}"></div></figure>

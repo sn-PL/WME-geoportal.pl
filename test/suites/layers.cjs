@@ -80,40 +80,46 @@ module.exports = async function layers(report) {
     }),
     Object.entries(env.internals.CONTRAST_FILTER).map(([kind, value]) => `${kind}: ${value}`).join(' | '));
 
-  // Round 29: the one drawing whose letters are the information - the parcel numbers -
-  // is white ink with a black casing again, drawn twice the size, and the re-colour is
-  // keyed on DARKNESS (round 28 was right that alpha alone cannot do it: a parcel
-  // number is dark digits on a white plate, and both are opaque). The key is a
-  // feColorMatrix whose alpha is 1 - luminance, masked by the drawing's own coverage.
+  // Round 30: every drawing of the `Podział Administracyjny` group - the parcel numbers
+  // and the five boundary layers with their own names - is plain white ink, drawn twice
+  // the size. The re-colour is keyed on DARKNESS: a parcel number is dark digits on a
+  // white plate and both are opaque, so whitening by coverage (rounds 23-27) turned the
+  // pair into one white shape. The key is a feColorMatrix whose alpha is 1 - luminance,
+  // masked by the drawing's own coverage, and there is no casing under the letters.
   const filters = env.internals.CONTRAST_FILTER;
   const svg = registry['Geoportal - podział adm'].instance.div.ownerDocument
     .getElementById('geoportal-label-filters');
   const ink = svg && svg.querySelector('filter[id="geoportal-labels-ink"]');
-  report.check('the filter that re-draws the ink is on the page once, and only the lettered layer points at it',
-    !!svg && !!ink && svg.querySelectorAll('filter').length === 1 &&
+  const namesInk = svg && svg.querySelector('filter[id="geoportal-labels-names"]');
+  report.check('the two filters that re-draw the ink are on the page once, and only the lettered layers point at them',
+    !!svg && !!ink && !!namesInk && svg.querySelectorAll('filter').length === 2 &&
     filters.white === 'url(#geoportal-labels-ink)' &&
+    filters.names === 'url(#geoportal-labels-names)' &&
     Object.entries(filters).every(([kind, value]) =>
-      kind === 'white' || !value.includes('url(#')),
+      kind === 'white' || kind === 'names' || !value.includes('url(#')),
     Object.entries(filters).map(([kind, value]) => `${kind}: ${value}`).join(' | '));
+  const luminanceKey = element => {
+    const matrix = element && element.querySelector('feColorMatrix');
+    if (!matrix || matrix.getAttribute('type') !== 'matrix') return null;
+    const values = (matrix.getAttribute('values') || '').trim().split(/\s+/).map(Number);
+    if (values.length !== 20) return null;
+    const row = values.slice(15, 18);                      // the alpha row: R, G, B
+    return { luminance: row, intercept: values[19] };
+  };
   report.check('the ink is keyed on darkness, so a white plate under the digits is not ink',
     (() => {
-      const matrix = ink && ink.querySelector('feColorMatrix');
-      if (!matrix || matrix.getAttribute('type') !== 'matrix') return false;
-      const values = (matrix.getAttribute('values') || '').trim().split(/\s+/).map(Number);
-      if (values.length !== 20) return false;
-      const luminance = values.slice(15, 18);              // the alpha row: R, G, B
-      const intercept = values[19];
-      // filter values are normalised: alpha = luminance · rgb + intercept, so white
-      // (1.0) -> 0 and a dark digit (0.16) -> about 0.84
-      const alphaOf = v => (luminance[0] + luminance[1] + luminance[2]) * v + intercept;
+      const key = luminanceKey(ink);
+      if (!key) return false;
+      const alphaOf = v => (key.luminance[0] + key.luminance[1] + key.luminance[2]) * v + key.intercept;
+      // values are normalised: white (1.0) -> 0, a dark digit (0.16) -> about 0.84
       return Math.abs(alphaOf(1)) < 0.02 &&
-        Math.abs(luminance[0] - (-0.299)) < 1e-6 &&
-        Math.abs(luminance[1] - (-0.587)) < 1e-6 &&
-        Math.abs(luminance[2] - (-0.114)) < 1e-6 &&
+        Math.abs(key.luminance[0] - (-0.299)) < 1e-6 &&
+        Math.abs(key.luminance[1] - (-0.587)) < 1e-6 &&
+        Math.abs(key.luminance[2] - (-0.114)) < 1e-6 &&
         alphaOf(0.16) > 0.6;
     })(),
     'feColorMatrix alpha = -0.299R - 0.587G - 0.114B + 1, masked by the drawing');
-  report.check('the key is smoothed before it is snapped, and the smoothing is small',
+  report.check('the parcel numbers are smoothed hard enough to lose the two-pixel steps, and a one pixel line survives',
     (() => {
       const blur = ink && ink.querySelector('feGaussianBlur');
       const transfer = ink && ink.querySelector('feFuncA');
@@ -130,25 +136,40 @@ module.exports = async function layers(report) {
         return x >= 0 ? y : -y;
       };
       const peak = erf(0.5 / (sigma * Math.SQRT2));
-      return Number.isFinite(sigma) && sigma > 0.4 && sigma <= 1 &&
-        order && slope >= 4 && cut > 0.05 && cut < 0.3 && peak > cut + 0.2;
+      return Number.isFinite(sigma) && sigma >= 0.6 && sigma <= 1.2 &&
+        order && slope >= 4 && cut > 0.1 && cut < 0.3 && peak > cut + 0.2;
     })(),
-    'a blur of 0.4-1 px in front of a short transfer, and a one pixel line still crosses it');
-  report.check('the ink is white and carries a one-pixel black casing grown from its own shape',
-    !!ink && ink.querySelector('feFlood[flood-color="#fff"]') &&
-    ink.querySelector('feMorphology')?.getAttribute('operator') === 'dilate' &&
-    ink.querySelector('feMorphology')?.getAttribute('radius') === '1' &&
-    ink.querySelector('feFlood[flood-color="#000"]') !== null &&
-    /<feMerge><feMergeNode in="casing"\/><feMergeNode in="whiteink"\/><\/feMerge>/
-      .test(env.internals.CONTRAST_SVG),
-    'white flood masked by the ink, black dilate under it');
-  const lettered = names.filter(name => LAYERS[name].contrast === 'white');
-  report.check('the parcel numbers are the one drawing re-drawn this way, and they are asked for twice the size',
-    lettered.length === 1 && lettered[0] === 'Geoportal - podział adm' &&
-    registry['Geoportal - podział adm'].definition.options.magnify === env.internals.LABEL_MAGNIFY &&
-    registry['Geoportal - podział adm'].definition.options.tileSize === env.internals.LABEL_CELL &&
-    env.internals.LABEL_CELL === 2048,
-    `magnify ${env.internals.LABEL_MAGNIFY}, cell ${env.internals.LABEL_CELL} px`);
+    'a blur of 0.6-1.2 px in front of a short transfer, and a one pixel line still crosses it');
+  report.check('the pale names of the boundary layers take the same key with a cut down at their own brightness',
+    (() => {
+      const key = luminanceKey(namesInk);
+      const transfer = namesInk && namesInk.querySelector('feFuncA');
+      if (!key || !transfer) return false;
+      const slope = Number(transfer.getAttribute('slope'));
+      const cut = -Number(transfer.getAttribute('intercept')) / slope;
+      const keyOf = v => (key.luminance[0] + key.luminance[1] + key.luminance[2]) * v + key.intercept;
+      const outOf = v => slope * keyOf(v) + Number(transfer.getAttribute('intercept'));
+      // measured on the service's drawing: names 230, 217, 231 on a plate of 250, 248, 251
+      return namesInk.querySelector('feGaussianBlur') !== null &&
+        cut < 0.08 && outOf(0.9) > 0.6 && outOf(0.975) <= 0;
+    })(),
+    'names at about 0.9 of white become ink, their plate at 0.975 does not');
+  report.check('the letters are plain white: no casing is grown under them',
+    !!ink && !!namesInk &&
+    ink.querySelector('feFlood[flood-color="#fff"]') !== null &&
+    !ink.querySelector('feMorphology') && !ink.querySelector('feFlood[flood-color="#000"]') &&
+    !namesInk.querySelector('feMorphology') &&
+    /<feComposite in="white" in2="ink" operator="in"\/>/.test(env.internals.CONTRAST_SVG),
+    'a white flood masked by the ink, and nothing else');
+  const group = ['Geoportal - podział adm', 'Geoportal - Miasta', 'Geoportal - gminy',
+    'Geoportal - powiaty', 'Geoportal - województwa', 'Geoportal - Granica PL'];
+  report.check('every drawing of the administrative group is white ink, drawn twice the size in one image per window',
+    group.every(name => LAYERS[name].contrast === 'white' || LAYERS[name].contrast === 'names') &&
+    group.every(name => registry[name].definition.options.magnify === env.internals.LABEL_MAGNIFY &&
+      registry[name].definition.options.tileSize === env.internals.LABEL_CELL) &&
+    env.internals.LABEL_CELL === 2048 &&
+    names.filter(name => registry[name].definition.options.magnify !== undefined).length === 6,
+    `${group.length} layers at magnify ${env.internals.LABEL_MAGNIFY}, cell ${env.internals.LABEL_CELL} px`);
   const verbatim = ['Geoportal - adresy', 'Geoportal - ulice', 'Geoportal - place',
     'Geoportal - adresy, place i ulice w jednym', 'Geoportal - obiekty topograficzne',
     'Geoportal - przejazdy kolejowe (wymagany duży zoom)'];
@@ -156,24 +177,8 @@ module.exports = async function layers(report) {
     verbatim.every(name => LAYERS[name].contrast === false) &&
     verbatim.every(name => !(registry[name].instance?.div?.style?.filter)) &&
     names.filter(name => registry[name].definition.options.magnify !== undefined)
-      .every(name => name === 'Geoportal - podział adm'),
+      .every(name => group.includes(name)),
     `${verbatim.length} layers with no filter and no magnified request`);
-  // The five boundary layers draw translucent coloured areas along with their names,
-  // so they cannot be made white without painting those areas over the map as white
-  // slabs. Their names come from the service as a very pale letter on a slightly
-  // paler plate of its own (measured: 230, 217, 231 against 250, 248, 251), so they
-  // are pulled apart with contrast instead of being lifted into the same white, and
-  // they take the same one pixel of black outline as every other layer.
-  report.check('the layers that draw coloured areas keep their ink and only gain the black outline',
-    filters.outline === 'drop-shadow(0 0 1px #000) drop-shadow(0 0 1px #000)' &&
-    ['Geoportal - Miasta', 'Geoportal - gminy', 'Geoportal - powiaty', 'Geoportal - województwa',
-      'Geoportal - Granica PL'].every(name => LAYERS[name].contrast === 'outline') &&
-    Object.entries(LAYERS).filter(([, entry]) => entry.contrast === 'outline').length === 5,
-    filters.outline);
-  report.check('nothing of those layers is recoloured, brightened or thresholded',
-    !filters.outline.includes('invert') && !filters.outline.includes('brightness') &&
-    !filters.outline.includes('url(#') && !filters.outline.includes('#fff'),
-    'the coloured areas, the boundary lines and the pale lettering stay what the service drew');
   report.check('only the drawings whose colour is the map itself keep a white casing',
     LAYERS['Geoportal - drogi'].contrast === 'dark' &&
     Object.entries(LAYERS).filter(([, entry]) => entry.contrast === 'colour').length === 8 &&
