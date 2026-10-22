@@ -4,14 +4,13 @@
  * ortho photo, in one box of the same size each:
  *
  *   - as the service draws the cell at its own size (no filter) - the reference,
- *     (since round 25 a cell of those layers is 1024 px and the image asked for is
- *     512 px, so a window is built from a few images instead of dozens - the letter
- *     treatment itself is unchanged),
- *   - as the previous version showed it (the same white re-draw with the threshold
- *     straight onto the doubled raster - the stepped contour of the round-26 report),
- *   - as the script shows it now (the image of half the pixels, which makes the
- *     service draw its letters twice as big, stretched back and put through the
- *     filters that smooth the contour and snap every edge onto the pixel grid).
+ *   - as the versions of rounds 23-27 showed it (the whole drawing turned into white
+ *     ink, the image asked for at half the pixels and stretched back - the white
+ *     blob of a parcel number that the report of 10.2026 caught, and the white band
+ *     a street became),
+ *   - as the script shows it now (round 28: exactly the drawing of the service, at
+ *     one image pixel per pixel of the map, with the one treatment its ink asks for -
+ *     a black casing for the boundary layers, a lift for the roads and the BDOT).
  *
  * The drawings are loaded straight from the Geoportal, for the address the script's
  * own request has, and both treatments use the script's own filter strings, so what
@@ -98,20 +97,16 @@ for (const name of SHOW) {
   // The same cell with the pixels the map draws it with: that is the drawing of the
   // previous rounds, at one pixel per pixel.
   const full = withSize(url, Number(query.WIDTH) * 2, Number(query.HEIGHT) * 2);
-  // What the middle column shows: for the drawings that are re-drawn white, the same
-  // chain without the smoothing of round 26 - that is the stepped contour of the
-  // report. For the layers whose ink is left alone (the boundaries, the roads, the
-  // BDOT surfaces) nothing changed in this round, and the column says so.
-  const previous = kind === 'white'
-    ? { css: 'brightness(0) invert(1) url(#geoportal-previous)', caption: 'poprzednio &mdash; s&#322;absze wyg&#322;adzanie (0,8 px)' }
-    : !kind
-      // The addresses, the streets and the places since round 27: the same chain as
-      // the re-drawn layers, i.e. what the service's street surface became - a white
-      // band over the photo - against the service's own drawing in the last column.
-      ? { css: 'brightness(0) invert(1) url(#geoportal-previous)', caption: 'poprzednio (do rundy 26) &mdash; ca&#322;y rysunek bielony: ulica jako bia&#322;a wst&#281;ga' }
-      : { css: filters[kind], caption: kind === 'outline'
-          ? 'bez zmian od rundy 24 &mdash; rysunek us&#322;ugi + obw&oacute;dka'
-          : 'bez zmian od rundy 20 &mdash; rozja&#347;nienie i bia&#322;a kraw&#281;d&#378;' };
+  // What the middle column shows: for every drawing that rounds 23-27 recoloured, the
+  // chain of those rounds - the whole drawing made white and stretched from half the
+  // pixels, which is the white blob of a number and the white band of a street. For
+  // the layers whose ink was never recoloured (the boundaries, the roads, the BDOT
+  // surfaces) the column shows the same filter the script uses, and says so.
+  const previous = !kind
+    ? { css: 'brightness(0) invert(1) url(#geoportal-previous)', caption: 'poprzednio (rundy 23-27) &mdash; ca&#322;y rysunek bielony i rozci&#261;gni&#281;ty z po&#322;owy pikseli' }
+    : { css: filters[kind], caption: kind === 'outline'
+        ? 'bez zmian od rundy 24 &mdash; rysunek us&#322;ugi + obw&oacute;dka'
+        : 'bez zmian od rundy 20 &mdash; rozja&#347;nienie i bia&#322;a kraw&#281;d&#378;' };
   rows.push({
     name: name.replace('Geoportal - ', ''),
     kind,
@@ -123,9 +118,10 @@ for (const name of SHOW) {
   });
 }
 
-// The filter elements the script ships, so the page opens on them.
+// The treatments the script ships, and the historical chain of rounds 23-27, which
+// the page carries itself (the script no longer has an SVG filter at all).
 const filter = filters;
-const svg = env.internals.CONTRAST_SVG;
+const svg = '';
 const centre = env.map.getCenter();
 env.close();
 
@@ -191,21 +187,19 @@ ${svg}
   <label>powi&#281;kszenie ramki <input id="z" type="range" min="1" max="3" step="1" value="2">
     <code id="zx">2&times;</code></label>
   <div class="note">Trzecia kolumna u&#380;ywa filtr&oacute;w, kt&oacute;re skrypt ma teraz:
-    <code>white</code> (kreski i punkty: bia&#322;y atrament + czarna obw&oacute;dka),
-    <code>outline</code> (warstwy granic: <b>rysunek us&#322;ugi bez zmian</b> + ta sama czarna
-    obw&oacute;dka), <code>dark</code> i <code>colour</code> (drogi, BDOT) bez zmian od rundy 20.
-    Od rundy 25 kom&oacute;rka tych warstw ma 1024 px, a obraz 512 px (by&#322;o 256/128) &mdash;
-    liter to nie zmienia, a okno mapy sk&#322;ada si&#281; z kilku obrazk&oacute;w zamiast
-    kilkudziesi&#281;ciu, wi&#281;c us&#322;uga rysuje mniej kopii tych samych podpis&oacute;w.
-    Runda 26 dodaje przed progiem rozmycie 0,8 px, a runda 27 zwi&#281;ksza je do
-    1,2 px i skraca zbocze progu (nachylenie 8): kontur litery przestaje by&#263;
-    schodkowy, a kraw&#281;d&#378; kreski jest delikatnie zmi&#281;kczona. Cienkie linie
-    rysunku zostaj&#261; &#8212; ich &347;rodek po rozmyciu nadal przekracza pr&oacute;g.
-    Kolumna &bdquo;poprzednio&rdquo; pokazuje &#322;a&#324;cuch z rundy 26.
-    <b>Adresy, ulice i place</b> s&#261; od rundy 27 rysowane tak, jak rysuje je
-    us&#322;uga: w ich wierszach trzecia kolumna nie ma filtra, a &#347;rodkowa
-    pokazuje, co robi&#322;o bielenie &mdash; powierzchnia ulicy zamienia&#322;a si&#281;
-    w bia&#322;&#261; wst&#281;g&#281; przez zdj&#281;cie, a numer domu w bia&#322;&#261; plam&#281;.</div>
+    <code>outline</code> (warstwy granic: <b>rysunek us&#322;ugi bez zmian</b> + jednopikselowa
+    czarna obw&oacute;dka), <code>dark</code> i <code>colour</code> (drogi, BDOT: rozja&#347;nienie
+    i bia&#322;a kraw&#281;d&#378;) &mdash; a warstwy z numerami, ulicami i podpisami
+    <b>nie maj&#261; &#380;adnego filtra</b>: s&#261; takie, jakie rysuje us&#322;uga.
+    Runda 28 usuwa ostatnie przerabianie rysunku: <b>ka&#380;da warstwa jest
+    proszona o dok&#322;adnie tyle pikseli, ile zajmuje na mapie</b> (jedna
+    kom&oacute;rka 256 px siatki edytora), wi&#281;c nie ma ju&#380; ani rozci&#261;gania,
+    ani bielenia. Kolumna &bdquo;poprzednio&rdquo; pokazuje &#322;a&#324;cuch z rund
+    23&ndash;27: ca&#322;y rysunek na bia&#322;y atrament i rozci&#261;gni&#281;ty z po&#322;owy
+    pikseli &mdash; tak powstawa&#322;a bia&#322;a plama z numeru dzia&#322;ki
+    (ciemne cyfry na bia&#322;ej tabliczce s&#261; <b>oba</b> atramentem, wi&#281;c po
+    wybieleniu zlewaj&#261; si&#281; w jeden bia&#322;y kszta&#322;t) oraz bia&#322;a
+    wst&#281;ga z powierzchni ulicy.</div>
 </fieldset>
 ${rows.map(row => `<div class="row">
   <h2>${row.name}<small>${row.kind ? `filtr: ${row.kind}` : 'bez filtra'} &middot; ${row.detail}</small></h2>

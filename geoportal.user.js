@@ -23,7 +23,7 @@
  */
 
 /* Changelog:
- *  1.6.0 - OSM, the standard photo layer, the level crossings and the topographic objects come as tiles of the editor's own map, because those services refuse a whole-window picture; the parcels and the boundaries are tiles of that map again too, so a pan inside the margin of the tiles asks for nothing at all and a longer one only for the strip it uncovers; the crossings and the detailed BDOT switches ask in EPSG:2180, the system those services draw in - asked in 4326 they answer with a picture of their own error instead of the data (drawn into the image, because OpenLayers asks a WMS for INIMAGE exceptions); every service is now asked for its errors as documents instead of pictures, so a failure leaves a hole in the layer instead of a grey plate of text on the map; the drawings whose letters are the information are re-drawn instead of filtered: the layer asks the service for the same area at half the pixels, which makes it draw its letters twice as big, and the filter of the layer then makes them white and snaps every edge onto the pixel grid, with a one-pixel black casing around each letter - and the contour is smoothed first: the letters of a service are rasterised for the size of the image, so at twice that size every edge of theirs is a step of two screen pixels, which is what the eye reads as ragged lettering; a blur of 1.2 px turns those steps into ramps and a short edge of the transfer puts the colour back onto one line of a ramp, so the letters are smooth and the edge of a stroke is anti-aliased instead of two hard raster pixels, while the drawing's own one-pixel lines survive it - so the parcels and their numbers, the crossings and the topographic objects are white ink with a small black outline, hard-edged and twice the size, where a halo around a letter five pixels tall was only a grey smudge of it, while the addresses, the streets and the places are left exactly as the service draws them - a street there is a wide translucent surface, and whitening it painted the street over the photo as a white band with two thin lines as its only detail (the report of 10.2026), so those layers are back to the service's own drawing, in cells of the editor's grid and with no filter at all; the towns, the communes, the counties, the provinces and the state border draw translucent coloured areas along with their names, so nothing of their ink is touched - not whitened, not lifted, not put through the threshold, because that turned their pale lettering and its own light plate into one washed-out slab (letters 230, 217, 231 on a plate of 250, 248, 251 in the report of 1.6.0) - and their whole drawing only gains the same one pixel of black outline, which is what their already-white names need over a pale field; the road network and the BDOT surfaces, whose colour is the map itself, are still lifted under a thin white edge; the drawings whose letters are the information are asked for in cells of the map of their own size - eight times the editor's own for the parcels and the town boundaries, whose every parcel or obręb carries a number, and four times it for the rest - so one picture of the service covers that much ground and a window of the editor's size is one or two pictures instead of dozens: every picture a service renders has its own set of names drawn into it, and a name that lies on the edge between two pictures was drawn in both of them, standing beside itself as the doubled numbers of the reports; a view picture is never asked for past about a megapixel, a refused image is asked for again after a moment, the drawing of the view a layer has delivered stays on the map only for as long as that view is the one being asked for (OpenLayers used to keep it beside the new one, at the offset of the pan, which is what doubled the parcel numbers and the names), it is never carried through a zoom, and a setting that cannot be read no longer stops the script.
+ *  1.6.0 - OSM, the standard photo layer, the level crossings and the topographic objects come as tiles of the editor's own map, because those services refuse a whole-window picture; the parcels, the addresses and the boundaries are tiles of that map too, so a pan inside the margin of the tiles asks for nothing at all and a longer one only for the strip it uncovers; the crossings and the detailed BDOT switches ask in EPSG:2180, the system those services draw in - asked in 4326 they answer with a picture of their own error instead of the data (drawn into the image, because OpenLayers asks a WMS for INIMAGE exceptions); every service is now asked for its errors as documents instead of pictures, so a failure leaves a hole in the layer instead of a grey plate of text on the map; every layer is asked for exactly the pixels the map draws it with - one pixel of the service per pixel of the map, in cells of the editor's own grid - and shows what the service drew, because the drawings of these services cannot be recoloured without losing them: a parcel number is a dark number on a white plate, so the whitening of the earlier rounds turned plate and digits into one white shape (the unreadable numbers of the report of 10.2026), and a street of the address service is a wide translucent surface, so the same filter painted it over the photo as a white band; two treatments are left and neither recolours the drawing: the five boundary layers - whose own names are already white - gain one pixel of black casing, and the road network and the BDOT surfaces, whose colour is the map itself, are lifted under a thin white edge; a view picture is never asked for past about a megapixel, a refused image is asked for again after a moment, the drawing of the view a layer has delivered stays on the map only for as long as that view is the one being asked for (OpenLayers used to keep it beside the new one, at the offset of the pan, which is what doubled the parcel numbers and the names), it is never carried through a zoom, and a setting that cannot be read no longer stops the script.
  *  1.5.5 - WME SDK v2.374: async SDK mode; version-tolerant startup, events, zoom filtering and controls; photo layers request JPEG without the needless transparency flag, as one image per view instead of a tile grid (the ortho WMS answers whole tile batches with 404); a refused image is requested three times - once immediately, then twice at a growing distance - and a view image that OpenLayers gave up on is requested again instead of leaving the map empty.
  *  1.5.4 - Use SDK readiness, state and events; guard WMS and preserve the Layers menu.
  *  1.5.2 - New layer names address, streets WMS endpoint
@@ -81,40 +81,27 @@
   // These services draw their overlays as thin strokes and small letters, in colours
   // the editor's imagery swallows: black for the roads and the topographic objects, a
   // faint blue for the parcels, white names on coloured lines for the borders. And
-  // they rasterise their letters 5-8 pixels tall. That is what every report about
-  // them comes down to: at that size no filter can make a letter readable, a halo
-  // wider than the stroke of a letter *is* the letter (a white halo around a
-  // one-pixel stroke leaves a grey smudge, and over a meadow it leaves nothing), and
-  // stretching the raster over more pixels only makes the same grey bigger.
+  // they rasterise their letters 5-8 pixels tall, which is why filter after filter
+  // failed on them: at that size a halo is wider than the stroke of a letter, and
+  // stretching the raster only makes the same grey bigger.
   //
-  // So the drawing is not filtered any more, it is re-drawn. The browser asks the
-  // service for the same area at half the pixels (`magnify`) and stretches that image
-  // over the place: the letters, which the service draws at a fixed pixel size, come
-  // out twice as big. The filter then takes the soft grey result and turns it back
-  // into ink: every pixel's alpha is pushed to either 0 or 1, which snaps every edge
-  // and every letter's outline back onto the pixel grid, and the letters are made pure
-  // white on the way in (brightness(0) invert(1) - the same alpha, i.e. the same
-  // shape, in white). A one-pixel casing is grown around each letter with
-  // feMorphology, which is what a white letter needs over a pale meadow; it is the
-  // letter's own edge, not a halo - nothing is blurred and nothing is added on top of
-  // the ink. This is the closest thing to a vector drawing a raster service can give.
+  // The last attempt at the letters themselves is gone with 1.6.0's round of reports
+  // (10.2026): those drawings were asked for at half the pixels and whitened, i.e.
+  // every pixel of the service's drawing became white ink - and a parcel number is
+  // drawn by the service as a dark number on a white plate. Both are ink, so both
+  // became the same white shape: one white blob per number, with nothing left of the
+  // digits but the counters of 0, 6 and 8. A street of the address service is a wide
+  // translucent surface, so the same filter painted it over the photo as a white band.
+  // Colour cannot be taken apart from ink in a raster: what the drawing contains is
+  // the drawing.
   //
-  // Where that cannot be done, the drawing keeps its ink untouched and is only given
-  // the casing. That is the five boundary layers: they draw translucent coloured
-  // areas along with their names (the obreb fills of "Miasta"), so making every pixel
-  // white would paint those areas over the map as white slabs, and putting the whole
-  // drawing through the threshold of the filter turns their wide, pale lettering into
-  // one bright slab (which is what the report of 1.6.0 caught: letters at 230, 217,
-  // 231 on their own plate at 250, 248, 251 read as a single washed-out shape, and
-  // the same service draws the towns of the same layer in crisp white, so the layer
-  // looks "mixed" - two styles in one drawing). Those layers are asked for at twice
-  // the size like the rest, and their whole drawing - names, boundary lines and the
-  // coloured areas - gets one pixel of black outline, which is what their
-  // already-white letters need over a pale field. Nothing of their ink is recoloured,
-  // brightened or thresholded.
+  // So every layer is now asked for at exactly the pixels the map draws it with, in
+  // cells of the editor's own grid, and shows what the service drew. Two treatments
+  // are left, and neither recolours the drawing: the five boundary layers - whose own
+  // names are already white - gain one pixel of black casing, and the road network and
+  // the BDOT surfaces, whose colour is the map itself, are lifted under a thin white
+  // edge so they read over the imagery.
   const CONTRAST_FILTER = {
-    // the drawings that are strokes and points: white ink, one pixel of black casing
-    white: "brightness(0) invert(1) url(#geoportal-labels-ink)",
     // the drawings that carry coloured areas: nothing of their ink is touched, they
     // only get the same one pixel of black casing
     outline: "drop-shadow(0 0 1px #000) drop-shadow(0 0 1px #000)",
@@ -123,64 +110,7 @@
     colour: "brightness(2.2) saturate(1.7) " +
       "drop-shadow(0 0 1px #fff) drop-shadow(0 0 1px #fff)"
   };
-  // The filter itself, as an element of the page: a CSS filter cannot express "every
-  // alpha becomes 0 or 1" nor "grow the shape by one pixel", so the one that re-draws
-  // the ink is an SVG filter the layer's element points at - the same one for both
-  // kinds above. The threshold is alpha * 4 - 1.1 (the pixel is ink or it is not,
-  // from a quarter of the service's own coverage up), and the casing is one pixel of
-  // dilate under a black flood, merged under the ink.
-  const CONTRAST_SVG =
-    '<svg id="geoportal-label-filters" width="0" height="0" ' +
-    'style="position:absolute;left:0;top:0;pointer-events:none">' +
-    '<defs>' +
-    // The letters of a service are rasterised for the size of the image, and that
-    // image is drawn twice as large (LABEL_MAGNIFY), so every edge of a letter is
-    // the edge of a raster pixel of the service - a step of two screen pixels, on
-    // every diagonal. Measured on a report, that is what the eye reads as ragged
-    // lettering. A small blur first turns each of those steps into a ramp, and the
-    // threshold behind it puts the colour back onto one line of the ramp - a smooth
-    // contour, hard edge, nothing left half lit. Blurring the whole drawing this way
-    // keeps what it is made of: a one pixel line thins by a fraction and does not
-    // vanish (its centre still crosses the threshold), and the transfer is not an
-    // instant on/off but a very short edge, so the contour ends on a lightly
-    // anti-aliased pixel instead of a hard corner of two raster pixels.
-    '<filter id="geoportal-labels-ink" x="-20%" y="-20%" width="140%" height="140%" ' +
-    'color-interpolation-filters="sRGB">' +
-    '<feGaussianBlur stdDeviation="1.2" result="soft"/>' +
-    '<feComponentTransfer in="soft" result="ink">' +
-    '<feFuncA type="linear" slope="8" intercept="-3.4"/>' +
-    '</feComponentTransfer>' +
-    '<feMorphology in="ink" operator="dilate" radius="1" result="grown"/>' +
-    '<feFlood flood-color="#000" result="black"/>' +
-    '<feComposite in="black" in2="grown" operator="in" result="casing"/>' +
-    '<feMerge><feMergeNode in="casing"/><feMergeNode in="ink"/></feMerge>' +
-    '</filter>' +
-    '</defs></svg>';
-  // How much smaller than the drawing the image asked for is, i.e. how many times
-  // the service's letters end up bigger than they were rasterised. Two - the letters
-  // of all of those drawings are five to eight pixels tall at their own size.
-  const LABEL_MAGNIFY = 2;
-  // The cell of the map such a drawing is asked for in. A service draws its labels
-  // into the image it is asked for and knows nothing outside that image: its label
-  // placement is solved per image. So a view built from many small images gets each
-  // name as many times as there are images over it, and two numbers whose parcels
-  // meet can be placed into different images and land on top of one another - the
-  // repeated and overlapping numbers of the reports. Both are answered by asking
-  // for fewer, larger images: at 1024 px per cell a window of a usual size is built
-  // from one or two images, the service lays out the whole frame in one pass, and a
-  // name has no second image left to be drawn into. The image asked for stays at
-  // 1/LABEL_MAGNIFY of the cell (512 px), so the letters keep the size they have,
-  // and the pixels per square metre of map do not change - what grows is how much
-  // of the map one image covers, i.e. what the first paint of an area brings in.
-  const LABEL_CELL = 1024;
-  // The two drawings whose every parcel, and every obręb, carries its number or name:
-  // those are the ones that repeat, and the ones whose numbers meet at the edge of an
-  // image, so they are asked for in cells of 2048 px - a window of the editor's size
-  // is then one image, or two, and the service lays the whole window out in one pass.
-  // The image asked for stays at 1/LABEL_MAGNIFY of the cell (1024 px, twice the cell
-  // the editor draws from), so the letters keep their size and the pixels per metre
-  // of map do not change.
-  const LABEL_CELL_WIDE = 2048;
+
   // Geodetic constants of EPSG:2180 (PUWG 1992): GRS80, transverse Mercator with
   // the scale factor 0.9993, central meridian 19°E and the usual false origin.
   const PUWG = { a: 6378137, f: 1 / 298.257222101, k0: 0.9993, meridian: 19, falseEasting: 500000, falseNorthing: -5300000 };
@@ -545,11 +475,9 @@
         {
           isBaseLayer: false, visibility: false,
           singleTile,
-          // The cell of the map this layer is drawn in. The editor's own cells are
-          // 256 px (the value OpenLayers falls back to); the drawings whose letters
-          // are the information ask for half a kilometre of map per cell instead
-          // (LABEL_CELL), so a view is made of a quarter of the images - see above.
-          tileSize: new adapter.OL.Size(options.tileSize ?? 256, options.tileSize ?? 256),
+          // The cell of the map this layer is drawn in: the editor's own 256 px, i.e.
+          // one image of the service per cell of the map it is drawn on.
+          tileSize: new adapter.OL.Size(256, 256),
           // How much of the map a single-tile layer renders. 1.5 is OpenLayers'
           // own default (a view plus a margin, so small pans need no new image);
           // 1 asks for the view itself, which is what the services that refuse a
@@ -567,20 +495,8 @@
             // the view image is missing, every request asks under a fresh address,
             // so no cache can answer it with the refused response.
             // Asked for exactly the pixels that will be drawn, never more and never
-            // fewer - except for the layers that ask for half of them on purpose
-            // (`magnify`). Those are the drawings whose letters are the information,
-            // and the one way to get a service letter bigger is to have it drawn in
-            // an image of half the pixels and stretched over the place; the filter
-            // of the layer then takes that soft result apart again (see
-            // CONTRAST_FILTER). The megapixel cap is on what the service is asked to
-            // render, so it is applied to the pixels of the request and not to the
-            // pixels of the map the cell covers - a cell twice the editor's own asks
-            // for a megapixel and is drawn from it, the cap leaving it alone.
-            const magnify = options.magnify ?? 1;
-            const imageSize = adapter.requestImageSize({
-              w: asked.w / magnify,
-              h: asked.h / magnify
-            });
+            // fewer: one pixel of the service's image per pixel of the map.
+            const imageSize = adapter.requestImageSize({ w: asked.w, h: asked.h });
             const request = {
               BBOX: crs === "EPSG:2180" ? bounds2180(bounds) : bounds.toArray(true),
               WIDTH: Math.max(64, Math.round(imageSize.w)),
@@ -638,10 +554,7 @@
       layer.setOpacity(opacity);
       this.map.addLayer(layer);
       const filter = CONTRAST_FILTER[options.contrast];
-      if (filter && layer.div) {
-        if (filter.includes("url(#")) this.installLabelFilters();
-        layer.div.style.filter = filter;
-      }
+      if (filter && layer.div) layer.div.style.filter = filter;
       this.retryMissingImage(layer, recovery);
       if (!this.olMap && layer.map) {
         this.olMap = layer.map;
@@ -649,19 +562,6 @@
         this.attachMapEvents();
       }
       return layer;
-    }
-
-    /**
-     * Put the filter of CONTRAST_SVG on the page, once, the first time a layer asks
-     * for it: the layer refers to it by name, and a name that is a child of another
-     * element of the page - the editor has no reason to carry ours - is not found.
-     */
-    installLabelFilters() {
-      if (this.labelFilters) return;
-      const holder = document.createElement("div");
-      holder.innerHTML = CONTRAST_SVG;
-      this.labelFilters = holder.firstChild;
-      document.body.appendChild(this.labelFilters);
     }
 
     /**
@@ -1116,32 +1016,35 @@
       // out empty on a normal screen. As tiles of the editor's grid every request
       // is one small cell and each of them is a hole at worst. It draws in
       // EPSG:4326, which is what the map itself speaks (see the note above it).
-      this.createWMSLayer("Geoportal - przejazdy kolejowe (wymagany duży zoom)", this.WMS_SERVICES.rail, "PMT_Linie_Kolejowe_Sp__z_o_o_,Kopalnia_Piasku_KOTLARNIA_-_Linie_Kolejowe_Sp__z__o_o_,Jastrzębska_Spółka_Kolejowa_Sp__z_o_o_,Infra_SILESIA_S_A_,EUROTERMINAL_Sławków_Sp__z_o_o_,Dolnośląska_Służba_Dróg_i_Kolei_we_Wrocławiu,CARGOTOR_Sp__z_o_o_,PKP_SKM_w_Trójmieście_Sp__z_o_o_,PKP_Linia_Hutnicza_Szerokotorowa_Sp__z_o__o_,PKP_Polskie_Linie_Kolejowe", "image/png", { singleTile: false, minZ: 15, crs: "EPSG:2180", hasOpacity: false, magnify: LABEL_MAGNIFY, tileSize: LABEL_CELL, contrast: "white" });
+      this.createWMSLayer("Geoportal - przejazdy kolejowe (wymagany duży zoom)", this.WMS_SERVICES.rail, "PMT_Linie_Kolejowe_Sp__z_o_o_,Kopalnia_Piasku_KOTLARNIA_-_Linie_Kolejowe_Sp__z__o_o_,Jastrzębska_Spółka_Kolejowa_Sp__z_o_o_,Infra_SILESIA_S_A_,EUROTERMINAL_Sławków_Sp__z_o_o_,Dolnośląska_Służba_Dróg_i_Kolei_we_Wrocławiu,CARGOTOR_Sp__z_o_o_,PKP_SKM_w_Trójmieście_Sp__z_o_o_,PKP_Linia_Hutnicza_Szerokotorowa_Sp__z_o__o_,PKP_Polskie_Linie_Kolejowe", "image/png", { singleTile: false, minZ: 15, crs: "EPSG:2180", hasOpacity: false });
       this.createWMSLayer("Geoportal - drogi", this.WMS_SERVICES.mileage, "planowane,wbudowie,pikietaz,drugorzedne,glowne,ekspresowe,autostrady", "image/png", { minZ: 12, hasOpacity: false, contrast: "dark" });
       // The parcels and the boundaries draw their names in the middle of the thing
       // they name, and the service draws them into every image it is asked for (a WMS
       // places its labels in the picture it renders, not on the map): as cells of the
-      // editor's grid it asks for the cell it is looking at, keeps the ones it
+      // editor's grid the layer asks for the cell it is looking at, keeps the ones it
       // already has and asks only for the strip a pan uncovers, instead of asking a
-      // service to render the whole window again for every move. The image of a cell
-      // is asked for at half of the pixels it is drawn with, which is what makes the
-      // service draw its names at twice the size, and the filter turns that stretched
-      // raster back into hard-edged ink. What stood on the map twice were never the
-      // cells: it was the image of the previous view that OpenLayers keeps beside the
-      // new one, which is dropped in getURL now.
-      this.createWMSLayer("Geoportal - podział adm", this.WMS_SERVICES.parcels, "dzialki,numery_dzialek", "image/png", { singleTile: false, minZ: 15, hasOpacity: false, magnify: LABEL_MAGNIFY, tileSize: LABEL_CELL_WIDE, contrast: "white" });
+      // service to render the whole window again for every move. What stood on the
+      // map twice were never the cells: it was the image of the previous view that
+      // OpenLayers keeps beside the new one, which is dropped in getURL now.
+      //
+      // A parcel number is a dark number on a white plate in the service's drawing,
+      // so it is shown as the service drew it: at one image pixel per map pixel, with
+      // no filter and no stretch - the whitening of the earlier rounds turned the
+      // plate and its digits into one white shape, which is the unreadable blob of the
+      // report of 10.2026.
+      this.createWMSLayer("Geoportal - podział adm", this.WMS_SERVICES.parcels, "dzialki,numery_dzialek", "image/png", { singleTile: false, minZ: 15, hasOpacity: false });
 
-      this.createWMSLayer("Geoportal - Miasta", this.WMS_SERVICES.border_city, "A06_Granice_obrebow_ewidencyjnych,A05_Granice_jednostek_ewidencyjnych,A04_Granice_miast", "image/png", { singleTile: false, minZ: 12, hasOpacity: false, magnify: LABEL_MAGNIFY, tileSize: LABEL_CELL_WIDE, contrast: "outline" });
-      this.createWMSLayer("Geoportal - gminy", this.WMS_SERVICES.border_city, "A03_Granice_gmin", "image/png", { singleTile: false, minZ: 10, hasOpacity: false, magnify: LABEL_MAGNIFY, tileSize: LABEL_CELL, contrast: "outline" });
-      this.createWMSLayer("Geoportal - powiaty", this.WMS_SERVICES.border_city, "A02_Granice_powiatow", "image/png", { singleTile: false, minZ: 10, hasOpacity: false, magnify: LABEL_MAGNIFY, tileSize: LABEL_CELL, contrast: "outline" });
-      this.createWMSLayer("Geoportal - województwa", this.WMS_SERVICES.border_city, "A01_Granice_wojewodztw", "image/png", { singleTile: false, minZ: 8, hasOpacity: false, magnify: LABEL_MAGNIFY, tileSize: LABEL_CELL, contrast: "outline" });
-      this.createWMSLayer("Geoportal - Granica PL", this.WMS_SERVICES.border_city, "A00_Granice_panstwa", "image/png", { singleTile: false, minZ: 0, hasOpacity: false, magnify: LABEL_MAGNIFY, tileSize: LABEL_CELL, contrast: "outline" });
+      this.createWMSLayer("Geoportal - Miasta", this.WMS_SERVICES.border_city, "A06_Granice_obrebow_ewidencyjnych,A05_Granice_jednostek_ewidencyjnych,A04_Granice_miast", "image/png", { singleTile: false, minZ: 12, hasOpacity: false, contrast: "outline" });
+      this.createWMSLayer("Geoportal - gminy", this.WMS_SERVICES.border_city, "A03_Granice_gmin", "image/png", { singleTile: false, minZ: 10, hasOpacity: false, contrast: "outline" });
+      this.createWMSLayer("Geoportal - powiaty", this.WMS_SERVICES.border_city, "A02_Granice_powiatow", "image/png", { singleTile: false, minZ: 10, hasOpacity: false, contrast: "outline" });
+      this.createWMSLayer("Geoportal - województwa", this.WMS_SERVICES.border_city, "A01_Granice_wojewodztw", "image/png", { singleTile: false, minZ: 8, hasOpacity: false, contrast: "outline" });
+      this.createWMSLayer("Geoportal - Granica PL", this.WMS_SERVICES.border_city, "A00_Granice_panstwa", "image/png", { singleTile: false, minZ: 0, hasOpacity: false, contrast: "outline" });
 
       // Topographic objects of the counties that published them. The integration
       // behind this address hands every request to the WMS of the county it
       // covers, and those answer in EPSG:2180 only - in 4326 the whole country
       // comes back as an empty image, which is what the layer showed.
-      this.createWMSLayer("Geoportal - obiekty topograficzne", this.WMS_SERVICES.topo, "bdot", "image/png", { singleTile: false, minZ: 16, crs: "EPSG:2180", hasOpacity: false, magnify: LABEL_MAGNIFY, tileSize: LABEL_CELL, contrast: "white" });
+      this.createWMSLayer("Geoportal - obiekty topograficzne", this.WMS_SERVICES.topo, "bdot", "image/png", { singleTile: false, minZ: 16, crs: "EPSG:2180", hasOpacity: false });
 
       // The composition draws these classes from about 1:10 000 up, and it draws
       // them in the national system EPSG:2180: asked in 4326 it answers one and
@@ -1341,7 +1244,7 @@
   /** @type {any} */ (window).__geoportalPl = Object.assign(geoportal, {
     internals: {
       VERSION: SCRIPT_VERSION, to2180, bounds2180, BDOT_LAYERS, PUWG, MAX_VIEW_PIXELS,
-      IMAGE_RETRY_DELAYS, TILE_MAX_ZOOM, CONTRAST_FILTER, CONTRAST_SVG, LABEL_MAGNIFY, Z_INDEX_BASE
+      IMAGE_RETRY_DELAYS, TILE_MAX_ZOOM, CONTRAST_FILTER, Z_INDEX_BASE
     }
   });
 })();

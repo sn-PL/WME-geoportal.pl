@@ -149,50 +149,23 @@ module.exports = async function requests(report) {
         (tile ? ' for one tile' : ' for the view'));
   }
 
-  // Sizes: a tile layer asks for cells of the editor's grid, the BDOT switches for
-  // the view itself (ratio 1), the road layer for the view plus its margin - and
-  // nothing past the megapixel the composition refuses. A cell is asked for at
-  // exactly the pixels the map draws it with, except for the drawings whose letters
-  // are the information: those ask for half of them, because the one way to get a
-  // service letter bigger is to have it drawn in an image of half the pixels and
-  // stretched over the place (the filter of the layer then sharpens it) - and those
-  // same layers are drawn in cells of the map of their own size - twice the editor's
-  // (1024 px) or eight times it (2048 px, the two layers whose every parcel or obręb
-  // carries a number) - so a view is made of a fraction of the images, every one of
-  // which the service puts its own copy of every name into. The addresses, the streets
-  // and the places are not among them since round 27: they are the service's drawing,
-  // cell for cell.
+  // Sizes: every WMS cell asks for exactly the pixels the map draws it with - one
+  // pixel of the service per pixel of the map, in a cell of the editor's own 256 px
+  // grid - the BDOT switches for the view itself (ratio 1) and the road layer for the
+  // view plus its margin, and nothing past the megapixel the composition refuses.
+  // Round 28 removed the last magnification: a magnified drawing is a stretched raster,
+  // and a parcel number (a dark number on a white plate) cannot survive being
+  // recoloured or stretched.
   for (const name of LAYER_ORDER.filter(name => LAYERS[name].kind === 'grid')) {
     const requests = env.requestsOf(env.layer(name));
     const sizes = [...new Set(requests.map(url => `${params(url).WIDTH}x${params(url).HEIGHT}`))];
-    const magnify = LAYERS[name].magnify ?? 1;
-    const cell = LAYERS[name].cell ?? 256;
-    const want = cell / magnify;
-    report.check(`“${name}” asks for cells of ${cell} px of map, at 1/${magnify} of the pixels of the cell it draws`,
-      sizes.length === 1 && sizes[0] === `${want}x${want}`,
+    report.check(`“${name}” asks for cells of 256 px of map, at exactly the pixels of the cell it draws`,
+      sizes.length === 1 && sizes[0] === '256x256',
       `${requests.length} cells, sizes ${sizes.join(', ')}`);
     const drawn = env.tileAt(env.layer(name), 0, 0)?.getTile()?.style;
-    report.check(`“${name}” is drawn in its own ${cell} px cell of the map`,
-      !drawn || drawn.width === `${cell}px`,
+    report.check(`“${name}” is drawn in its own 256 px cell of the map`,
+      !drawn || drawn.width === '256px',
       drawn ? `cell ${drawn.width} x ${drawn.height}` : 'no cell measured');
-  }
-
-  // Round 25: the images a view is made of, counted. This is what the repeated
-  // numbers of the reports are - a service renders every name of the ground an image
-  // covers into that image, so the number of images over a view is the number of
-  // chances for one number to be drawn twice - and this is the number that fell.
-  const gridSize = { w: 800, h: 600 };
-  const cellsOver = cell => (Math.ceil(gridSize.w / cell) + 1) * (Math.ceil(gridSize.h / cell) + 1);
-  for (const name of LAYER_ORDER.filter(name => LAYERS[name].cell)) {
-    const layer = env.layer(name);
-    const asked = params(env.requestOf(layer));
-    const image = env.tileAt(layer, 0, 0)?.imgDiv;
-    const cell = image ? parseFloat(image.style.width) : 0;
-    const images = layer.grid.reduce((sum, row) => sum + row.filter(Boolean).length, 0);
-    report.check(`“${name}” draws an 800x600 view out of far fewer images than the editor's own cells`,
-      cell === LAYERS[name].cell && images <= cellsOver(cell) && images * 4 <= cellsOver(256),
-      `${images} images of ${cell} px (asked for ${asked.WIDTH}x${asked.HEIGHT}), against ` +
-      `${cellsOver(256)} images of 256 px, ${cellsOver(cell)} if all of them covered the view`);
   }
 
   const oneImage = ['Geoportal - drogi',
@@ -214,21 +187,18 @@ module.exports = async function requests(report) {
       problems.length === 0, problems.join(', ') || `${width}x${height} for ${Math.floor(800 * expected.ratio)}x${Math.floor(600 * expected.ratio)} px of view`);
   }
 
-  // The size rule of the whole round, checked on every overlay at once: what a
-  // service is asked for is what the map draws, pixel for pixel - and the drawings
-  // whose letters are the information are the one exception, and by exactly the
-  // factor their letters are made bigger with.
+  // The size rule, checked on every overlay at once: what a service is asked for is
+  // what the map draws, pixel for pixel - no layer is stretched any more.
   const scaled = [];
   for (const name of LAYER_ORDER.filter(name => LAYERS[name].kind !== 'tiles')) {
     const tile = env.tileAt(env.layer(name), 0, 0);
     const asked = params(tile?.imgDiv?.src || '');
     const drawn = parseFloat(tile?.imgDiv?.style?.width || '');
-    const magnify = LAYERS[name].magnify ?? 1;
     if (!asked.WIDTH || !drawn) continue;
-    if (Number(asked.WIDTH) * magnify !== drawn ||
-        Number(asked.HEIGHT) * magnify !== parseFloat(tile.imgDiv.style.height)) {
+    if (Number(asked.WIDTH) !== drawn ||
+        Number(asked.HEIGHT) !== parseFloat(tile.imgDiv.style.height)) {
       scaled.push(`${name.replace('Geoportal - ', '')}: asked ${asked.WIDTH}x${asked.HEIGHT}, drawn ` +
-        `${drawn}x${parseFloat(tile.imgDiv.style.height)} (x${magnify})`);
+        `${drawn}x${parseFloat(tile.imgDiv.style.height)}`);
     }
   }
   report.check('every overlay is asked for at the size the map draws it, pixel for pixel or one half of it',

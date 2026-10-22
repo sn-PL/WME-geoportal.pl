@@ -69,10 +69,11 @@ module.exports = async function layers(report) {
   report.check('exactly the thin-drawn overlays carry the contrast filter',
     filtered.length === expectedFiltered.length && expectedFiltered.every(name => filtered.includes(name)),
     `${filtered.length} layers of ${names.length}`);
-  report.check('every one of the six boundary layers of the report was among them',
-    ['Geoportal - podział adm', 'Geoportal - Miasta', 'Geoportal - gminy', 'Geoportal - powiaty',
-      'Geoportal - województwa', 'Geoportal - Granica PL'].every(name => filtered.includes(name)),
-    'parcels, towns, communes, counties, provinces, state border');
+  report.check('every one of the five boundary layers of the report was among them',
+    ['Geoportal - Miasta', 'Geoportal - gminy', 'Geoportal - powiaty',
+      'Geoportal - województwa', 'Geoportal - Granica PL'].every(name => filtered.includes(name)) &&
+    !filtered.includes('Geoportal - podział adm'),
+    'towns, communes, counties, provinces, state border - the parcels since round 28 as the service draws them');
   report.check('each filtered layer carries the filter its ink asks for, and nothing else',
     filtered.every(name => {
       const filter = registry[name].instance.div.style.filter;
@@ -80,91 +81,41 @@ module.exports = async function layers(report) {
     }),
     Object.entries(env.internals.CONTRAST_FILTER).map(([kind, value]) => `${kind}: ${value}`).join(' | '));
 
-  // The drawings whose letters are the information are not filtered at all any
-  // more: they are re-drawn. Every pixel's alpha is pushed to 0 or 1, which snaps
-  // the service's grey, anti-aliased letters back onto the pixel grid, the letters
-  // are made pure white on the way in, and a one-pixel casing is grown around each
-  // of them - the letter's own edge, not a halo. That is an SVG filter, because no
-  // CSS filter function can express either of those two operations, and it has to be
-  // an element of the editor's page: the layer points at it by name.
+  // Round 28: no drawing is re-coloured any more. The white re-draw of rounds 23-27
+  // asked the service for half the pixels and turned every pixel of its drawing into
+  // white ink - and a parcel number is a dark number on a white plate, so plate and
+  // digits became one white shape (the unreadable numbers of the report of 10.2026),
+  // and a street of the address service is a wide translucent surface, which became a
+  // white band over the photo. What is left is two treatments, and neither of them
+  // recolours the drawing: the one-pixel black casing of the boundary layers and the
+  // lift of the roads and the BDOT surfaces.
   const filters = env.internals.CONTRAST_FILTER;
-  const svg = registry['Geoportal - podział adm'].instance.div.ownerDocument
-    .getElementById('geoportal-label-filters');
-  const filterElement = id => svg && svg.querySelector(`filter[id="${id}"]`);
-  const ink = filterElement('geoportal-labels-ink');
-  report.check('the filter that re-draws the ink is on the page, once',
-    !!svg && !!ink && (svg.querySelectorAll('filter').length === 1) &&
-    Object.values(filters).every(filter => !filter.includes('url(#') ||
-      filter.includes('url(#geoportal-labels-ink)')),
-    svg ? `${svg.querySelectorAll('filter').length} filter, pointed at by ${Object.values(filters).filter(f => f.includes('url(#')).length} layers` : 'no filter on the page');
-  report.check('every edge is snapped back onto the pixel grid, nothing is left half lit',
-    (() => {
-      const transfer = ink && ink.querySelector('feFuncA');
-      return transfer && transfer.getAttribute('type') === 'linear' &&
-        Number(transfer.getAttribute('slope')) >= 5;
-    })(),
-    'alpha * slope + intercept with a slope of at least 5, i.e. the edge is short');
-  // Round 26: the threshold alone left the staircases of the doubled raster in the
-  // letter's contour (every edge of the service's pixel is two screen pixels of step).
-  // A small blur in front of the threshold turns those steps into ramps, and the
-  // threshold puts the colour back onto one line of a ramp - a smooth contour with a
-  // hard edge. It has to be small: the drawing's own one pixel lines must survive it.
-  report.check('the contour is smoothed before it is snapped, and the smoothing is small',
-    (() => {
-      const blurs = ink ? [...ink.querySelectorAll('feGaussianBlur, feDropShadow')] : [];
-      if (blurs.length !== 1) return false;
-      const sigma = Number(blurs[0].getAttribute('stdDeviation'));
-      const first = ink.firstElementChild;
-      const order = first === blurs[0] && blurs[0].nextElementSibling?.tagName === 'feComponentTransfer';
-      return Number.isFinite(sigma) && sigma > 1 && sigma <= 1.6 && order;
-    })(),
-    'one feGaussianBlur of 1-1.6 px in front of the transfer: the step of one raster pixel becomes a ramp');
-  report.check('the letters carry a one-pixel casing grown from their own shape',
-    !!ink && ink.querySelector('feMorphology')?.getAttribute('operator') === 'dilate' &&
-    ink.querySelector('feMorphology')?.getAttribute('radius') === '1' &&
-    ink.querySelector('feFlood')?.getAttribute('flood-color') === '#000' &&
-    Object.values(filters).every(filter =>
-      [...filter.matchAll(/drop-shadow\(0 0 ([\d.]+)px/g)].every(match => Number(match[1]) <= 1)),
-    'dilate one pixel, flood black, composite under the ink');
-  report.check('the smoothing is a smoothing: a one pixel line of the drawing survives it',
-    (() => {
-      if (!ink) return false;
-      const sigma = Number(ink.querySelector('feGaussianBlur')?.getAttribute('stdDeviation'));
-      const transfer = ink.querySelector('feFuncA');
-      const slope = Number(transfer?.getAttribute('slope'));
-      const intercept = Number(transfer?.getAttribute('intercept'));
-      const cut = -intercept / slope;                       // where the transfer turns ink on
-      // The peak of a one pixel wide line after a gaussian of sigma [screen px], the
-      // line being two screen pixels wide because of LABEL_MAGNIFY.
-      const erf = x => {                                     // Abramowitz-Stegun 7.1.26
-        const t = 1 / (1 + 0.3275911 * Math.abs(x));
-        const y = 1 - ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
-        return x >= 0 ? y : -y;
-      };
-      const peak = erf(1 / (sigma * Math.SQRT2));
-      return peak > cut + 0.05;
-    })(),
-    'the blurred centre of a line stays above the threshold the transfer turns on at');
-  const lettered = names.filter(name => LAYERS[name].contrast === 'white');
-  report.check('every drawing that is strokes and points is white ink with a black outline',
-    /^brightness\(0\) invert\(1\) url\(#geoportal-labels-ink\)$/.test(filters.white) &&
-    lettered.length === 3 &&
-    ['Geoportal - podział adm', 'Geoportal - obiekty topograficzne',
-      'Geoportal - przejazdy kolejowe (wymagany duży zoom)']
-      .every(name => LAYERS[name].contrast === 'white'),
-    `${lettered.length} layers: parcels, topographic objects, crossings`);
-  // Round 27: the addresses, the streets and the places are back to what the service
-  // draws. A street is a wide translucent surface in the service's drawing, and making
-  // every pixel of it white turns the whole street into a white band across the photo
-  // with the two thin lines of the band's edge as its only detail - the report of 10.2026.
-  report.check('the addresses, the streets and the places are drawn exactly as the service draws them',
-    ['Geoportal - adresy', 'Geoportal - ulice', 'Geoportal - place',
-      'Geoportal - adresy, place i ulice w jednym'].every(name =>
-      LAYERS[name].contrast === false &&
-      registry[name].definition.options.magnify === undefined &&
-      registry[name].definition.options.tileSize === undefined &&
-      !(registry[name].instance?.div?.style?.filter)) ,
-    'no filter, no magnified request, no larger cell');
+  report.check('nothing on the page re-colours a drawing any more',
+    !('white' in filters) &&
+    Object.values(filters).every(filter => !filter.includes('invert') && !filter.includes('url(#')),
+    Object.entries(filters).map(([kind, value]) => `${kind}: ${value}`).join(' | '));
+  report.check('no SVG filter is put on the page', (() => {
+    const doc = registry['Geoportal - podział adm'].instance.div.ownerDocument;
+    return !doc.getElementById('geoportal-label-filters') &&
+      Object.values(filters).every(filter => !filter.includes('url(#'));
+  })(), 'the filters are CSS only');
+  const verbatim = ['Geoportal - podział adm', 'Geoportal - adresy', 'Geoportal - ulice',
+    'Geoportal - place', 'Geoportal - adresy, place i ulice w jednym',
+    'Geoportal - obiekty topograficzne', 'Geoportal - przejazdy kolejowe (wymagany duży zoom)'];
+  report.check('the drawings that carry a number, a name or a surface are shown exactly as the service draws them',
+    verbatim.every(name => LAYERS[name].contrast === false) &&
+    verbatim.every(name => !(registry[name].instance?.div?.style?.filter)) &&
+    names.every(name => registry[name].definition.options.magnify === undefined &&
+      registry[name].definition.options.tileSize === undefined),
+    `${verbatim.length} layers, no filter and no magnified request anywhere`);
+  report.check('the drawings are asked for one image pixel per pixel of the map, in the editor\'s own cells',
+    LAYER_ORDER.filter(name => LAYERS[name].kind === 'grid').every(name => {
+      const tile = env.tileAt(env.layer(name), 0, 0);
+      const drawn = parseFloat(tile?.imgDiv?.style?.width || '');
+      const asked = Number(new URLSearchParams((tile?.imgDiv?.src || '').split('?')[1] || '').get('WIDTH'));
+      return !drawn || (asked === drawn && drawn === 256);
+    }),
+    'every WMS cell: 256 px of map, 256 px asked for');
   // The five boundary layers draw translucent coloured areas along with their names,
   // so they cannot be made white without painting those areas over the map as white
   // slabs. Their names come from the service as a very pale letter on a slightly
@@ -187,30 +138,13 @@ module.exports = async function layers(report) {
     filters.dark.includes('#fff') && filters.colour.includes('#fff'),
     'the road classes and the BDOT surfaces');
 
-  // A magnified drawing - the layer asks for the same area at half the pixels and the
-  // browser stretches it back over the place - is the only lever that makes a
-  // service's letters bigger, and it is used for exactly the drawings whose letters
-  // are the information. Every other layer is asked for the pixels it is drawn with.
-  const magnified = names.filter(name => registry[name].definition.options.magnify !== undefined);
-  report.check('every drawing whose letters are the information asks for half the pixels',
-    magnified.length === 8 &&
-    magnified.every(name => registry[name].definition.options.magnify === env.internals.LABEL_MAGNIFY) &&
-    magnified.every(name => LAYERS[name].contrast === 'white' || LAYERS[name].contrast === 'outline'),
-    `${magnified.length} layers, all at twice the size`);
-  report.check('no other layer is drawn at a size other than its own',
-    names.filter(name => registry[name].definition.options.magnify === undefined ||
-      registry[name].definition.options.magnify === 1).length === names.length - 8,
-    'the ortho, the roads, the BDOT surfaces and the thematic maps');
-
-  // Of the four ways a drawing is made to read over the imagery, two lift the ink the
-  // service drew (the road network and the BDOT surfaces), one whitens it outright
-  // (the drawings whose letters are the information) and one only raises the service's
-  // own colours (the names it draws white itself). None of them may end up dimmer
-  // than the ink of 1.6.0, which used 1.7 with a single 1.5 px halo.
+  // Of the two treatments left, one raises the service's own colours (the roads and
+  // the BDOT surfaces) and one adds a casing without touching them (the boundaries).
+  // Neither may end up dimmer than the ink of 1.6.0, which used 1.7 with a halo.
   const lifts = ['dark', 'colour'].map(kind => Number(filters[kind].match(/brightness\(([\d.]+)\)/)[1]));
   report.check('the drawings that keep their colour are lifted as much as in 1.6.0',
-    Math.min(...lifts) >= 1.7 && filters.white.startsWith('brightness(0) invert(1)'),
-    `lifts ${lifts.join(' and ')}; the letters of the rest are made white outright`);
+    Math.min(...lifts) >= 1.7,
+    `lifts ${lifts.join(' and ')}`);
 
   // Opacity: a layer without a slider always draws at full opacity, whatever an
   // older version left in the settings.
