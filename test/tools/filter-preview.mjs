@@ -4,13 +4,14 @@
  * ortho photo, in one box of the same size each:
  *
  *   - as the service draws the cell at its own size (no filter) - the reference,
- *   - as the versions of rounds 23-27 showed it (the whole drawing turned into white
- *     ink, the image asked for at half the pixels and stretched back - the white
- *     blob of a parcel number that the report of 10.2026 caught, and the white band
- *     a street became),
- *   - as the script shows it now (round 28: exactly the drawing of the service, at
- *     one image pixel per pixel of the map, with the one treatment its ink asks for -
- *     a black casing for the boundary layers, a lift for the roads and the BDOT).
+ *   - as the versions of rounds 23-27 showed it (every pixel of the drawing turned
+ *     into white ink by its coverage alone - the white blob of a parcel number that
+ *     the report of 10.2026 caught, because the plate under the digits is opaque too),
+ *   - as the script shows it now (round 29: the parcel numbers are keyed on DARKNESS,
+ *     so the digits come through and the plate does not, drawn twice the size from a
+ *     cell of 2048 px and turned into white ink with a black casing; every other
+ *     drawing is shown exactly as the service draws it, with only the casing of the
+ *     boundary layers or the lift of the roads and the BDOT).
  *
  * The drawings are loaded straight from the Geoportal, for the address the script's
  * own request has, and both treatments use the script's own filter strings, so what
@@ -97,16 +98,18 @@ for (const name of SHOW) {
   // The same cell with the pixels the map draws it with: that is the drawing of the
   // previous rounds, at one pixel per pixel.
   const full = withSize(url, Number(query.WIDTH) * 2, Number(query.HEIGHT) * 2);
-  // What the middle column shows: for every drawing that rounds 23-27 recoloured, the
-  // chain of those rounds - the whole drawing made white and stretched from half the
-  // pixels, which is the white blob of a number and the white band of a street. For
-  // the layers whose ink was never recoloured (the boundaries, the roads, the BDOT
-  // surfaces) the column shows the same filter the script uses, and says so.
-  const previous = !kind
-    ? { css: 'brightness(0) invert(1) url(#geoportal-previous)', caption: 'poprzednio (rundy 23-27) &mdash; ca&#322;y rysunek bielony i rozci&#261;gni&#281;ty z po&#322;owy pikseli' }
-    : { css: filters[kind], caption: kind === 'outline'
-        ? 'bez zmian od rundy 24 &mdash; rysunek us&#322;ugi + obw&oacute;dka'
-        : 'bez zmian od rundy 20 &mdash; rozja&#347;nienie i bia&#322;a kraw&#281;d&#378;' };
+  // What the middle column shows: for the drawing whose ink the script re-colours (the
+  // parcel numbers) the chain of rounds 23-27 - the whole drawing made white from its
+  // coverage alone, which is the unreadable white plate of the round-28 report. For
+  // every drawing the script leaves alone it shows the same treatment the script uses,
+  // and says so.
+  const previous = kind === 'white'
+    ? { css: 'brightness(0) invert(1) url(#geoportal-previous)', caption: 'poprzednio (rundy 23-27) &mdash; bielenie po kryciu: tabliczka i cyfry w jedn&#261; bia&#322;&#261; plam&#281;' }
+    : kind
+      ? { css: filters[kind], caption: kind === 'outline'
+          ? 'bez zmian od rundy 24 &mdash; rysunek us&#322;ugi + obw&oacute;dka'
+          : 'bez zmian od rundy 20 &mdash; rozja&#347;nienie i bia&#322;a kraw&#281;d&#378;' }
+      : { css: 'none', caption: 'od rundy 28: dok&#322;adnie rysunek us&#322;ugi, bez filtra' };
   rows.push({
     name: name.replace('Geoportal - ', ''),
     kind,
@@ -118,10 +121,11 @@ for (const name of SHOW) {
   });
 }
 
-// The treatments the script ships, and the historical chain of rounds 23-27, which
-// the page carries itself (the script no longer has an SVG filter at all).
+// The treatments the script ships - including its own SVG filter, which the parcel
+// numbers point at - and the historical chain of rounds 23-27, which the page carries
+// itself so the blob of that report can be seen beside the current drawing.
 const filter = filters;
-const svg = '';
+const svg = env.internals.CONTRAST_SVG;
 const centre = env.map.getCenter();
 env.close();
 
@@ -177,29 +181,25 @@ ${svg}
 <p class="lead">
   Trzy razy ten sam kawa&#322;ek mapy, w ramkach tej samej wielko&#347;ci:
   <b>tak rysuje us&#322;uga</b> (obraz 1:1, bez filtra),
-  <b>tak by&#322;o poprzednio</b> (pr&#243;g wprost na podwojonym rastrze &mdash; ka&#380;da
-  kraw&#281;d&#378; piksela us&#322;ugi to na ekranie schodek z dw&oacute;ch pikseli) i
-  <b>tak jest teraz</b> (ten sam obraz, ale przed progiem lekko rozmyty, wi&#281;c kontur
-  jest g&#322;adki, a kraw&#281;d&#378; nadal twarda).
+  <b>tak by&#322;o poprzednio</b> (bielenie po kryciu &mdash; z numeru dzia&#322;ki
+  zostawa&#322;a bia&#322;a plama, bo tabliczka pod cyframi te&#380; jest nieprzezroczysta) i
+  <b>tak jest teraz</b> (klucz po ciemno&#347;ci: cyfry na bia&#322;o z czarn&#261;
+  obw&oacute;dk&#261;, tablica i niebieskie granice zostaj&#261; jak w us&#322;udze).
   Miejsce: Imbramowice, ${centre.lat.toFixed(5)}, ${centre.lon.toFixed(5)}.
 </p>
 <fieldset><legend>Podgl&#261;d</legend>
   <label>powi&#281;kszenie ramki <input id="z" type="range" min="1" max="3" step="1" value="2">
     <code id="zx">2&times;</code></label>
   <div class="note">Trzecia kolumna u&#380;ywa filtr&oacute;w, kt&oacute;re skrypt ma teraz:
-    <code>outline</code> (warstwy granic: <b>rysunek us&#322;ugi bez zmian</b> + jednopikselowa
-    czarna obw&oacute;dka), <code>dark</code> i <code>colour</code> (drogi, BDOT: rozja&#347;nienie
-    i bia&#322;a kraw&#281;d&#378;) &mdash; a warstwy z numerami, ulicami i podpisami
-    <b>nie maj&#261; &#380;adnego filtra</b>: s&#261; takie, jakie rysuje us&#322;uga.
-    Runda 28 usuwa ostatnie przerabianie rysunku: <b>ka&#380;da warstwa jest
-    proszona o dok&#322;adnie tyle pikseli, ile zajmuje na mapie</b> (jedna
-    kom&oacute;rka 256 px siatki edytora), wi&#281;c nie ma ju&#380; ani rozci&#261;gania,
-    ani bielenia. Kolumna &bdquo;poprzednio&rdquo; pokazuje &#322;a&#324;cuch z rund
-    23&ndash;27: ca&#322;y rysunek na bia&#322;y atrament i rozci&#261;gni&#281;ty z po&#322;owy
-    pikseli &mdash; tak powstawa&#322;a bia&#322;a plama z numeru dzia&#322;ki
-    (ciemne cyfry na bia&#322;ej tabliczce s&#261; <b>oba</b> atramentem, wi&#281;c po
-    wybieleniu zlewaj&#261; si&#281; w jeden bia&#322;y kszta&#322;t) oraz bia&#322;a
-    wst&#281;ga z powierzchni ulicy.</div>
+    <code>white</code> (numery dzia&#322;ek: klucz po ciemno&#347;ci, bia&#322;y atrament
+    z czarn&#261; obw&oacute;dk&#261;, obraz z kom&oacute;rki 2048 px w po&#322;owie
+    pikseli, wi&#281;c litery s&#261; dwa razy wi&#281;ksze), <code>outline</code>
+    (warstwy granic: <b>rysunek us&#322;ugi bez zmian</b> + obw&oacute;dka),
+    <code>dark</code> i <code>colour</code> (drogi, BDOT: rozja&#347;nienie) &mdash;
+    a adresy, ulice, place, przejazdy i obiekty topograficzne <b>nie maj&#261;
+    &#380;adnego filtra</b>. Rundy 23&ndash;27 bieli&#322;y ca&#322;y rysunek po kryciu
+    (kolumna &bdquo;poprzednio&rdquo;): tabliczka pod numerem jest nieprzezroczysta,
+    wi&#281;c z numeru zostawa&#322;a bia&#322;a plama.</div>
 </fieldset>
 ${rows.map(row => `<div class="row">
   <h2>${row.name}<small>${row.kind ? `filtr: ${row.kind}` : 'bez filtra'} &middot; ${row.detail}</small></h2>
@@ -211,7 +211,9 @@ ${rows.map(row => `<div class="row">
       <div class="stage"${row.bg ? ` style="background-image:url('${row.bg}')"` : ''}>
         <img class="over" src="${row.full}" alt="${row.name} jak do tej pory" loading="lazy"
              style="filter:${row.previous.css}"></div></figure>
-    <figure class="now"><figcaption>teraz &mdash; kontur wyg&#322;adzony, twarda kraw&#281;d&#378;, czarna obw&oacute;dka</figcaption>
+    <figure class="now"><figcaption>${row.kind === 'white'
+      ? 'teraz &mdash; klucz po ciemno&#347;ci: cyfry bia&#322;e, dwa razy wi&#281;ksze, tabliczka jak w us&#322;udze'
+      : 'teraz &mdash; rysunek bez przerabiania'}</figcaption>
       <div class="stage"${row.bg ? ` style="background-image:url('${row.bg}')"` : ''}>
         <img class="over" src="${row.url}" alt="${row.name} jak teraz" loading="lazy"
              style="filter:${row.kind ? filter[row.kind] : 'none'}"></div></figure>

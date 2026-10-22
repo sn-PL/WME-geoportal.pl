@@ -151,20 +151,23 @@ module.exports = async function requests(report) {
 
   // Sizes: every WMS cell asks for exactly the pixels the map draws it with - one
   // pixel of the service per pixel of the map, in a cell of the editor's own 256 px
-  // grid - the BDOT switches for the view itself (ratio 1) and the road layer for the
-  // view plus its margin, and nothing past the megapixel the composition refuses.
-  // Round 28 removed the last magnification: a magnified drawing is a stretched raster,
-  // and a parcel number (a dark number on a white plate) cannot survive being
-  // recoloured or stretched.
+  // grid - except the one drawing whose letters are the information (`podział adm`,
+  // round 29): it asks for a cell of 2048 px at half its pixels, so the service draws
+  // its numbers twice as big and the filter makes them white ink. The BDOT switches
+  // ask for the view itself (ratio 1) and the road layer for the view plus its margin,
+  // and nothing goes past the megapixel the composition refuses.
   for (const name of LAYER_ORDER.filter(name => LAYERS[name].kind === 'grid')) {
+    const magnify = LAYERS[name].magnify ?? 1;
+    const cell = LAYERS[name].cell ?? 256;
+    const want = `${cell / magnify}x${cell / magnify}`;
     const requests = env.requestsOf(env.layer(name));
     const sizes = [...new Set(requests.map(url => `${params(url).WIDTH}x${params(url).HEIGHT}`))];
-    report.check(`“${name}” asks for cells of 256 px of map, at exactly the pixels of the cell it draws`,
-      sizes.length === 1 && sizes[0] === '256x256',
+    report.check(`“${name}” asks for cells of ${cell} px of map, at 1/${magnify} of the pixels of the cell it draws`,
+      sizes.length === 1 && sizes[0] === want,
       `${requests.length} cells, sizes ${sizes.join(', ')}`);
     const drawn = env.tileAt(env.layer(name), 0, 0)?.getTile()?.style;
-    report.check(`“${name}” is drawn in its own 256 px cell of the map`,
-      !drawn || drawn.width === '256px',
+    report.check(`“${name}” is drawn in its own ${cell} px cell of the map`,
+      !drawn || drawn.width === `${cell}px`,
       drawn ? `cell ${drawn.width} x ${drawn.height}` : 'no cell measured');
   }
 
@@ -188,17 +191,19 @@ module.exports = async function requests(report) {
   }
 
   // The size rule, checked on every overlay at once: what a service is asked for is
-  // what the map draws, pixel for pixel - no layer is stretched any more.
+  // what the map draws, pixel for pixel - but for the one drawing that is stretched
+  // on purpose, and by exactly the factor its letters are made bigger with.
   const scaled = [];
   for (const name of LAYER_ORDER.filter(name => LAYERS[name].kind !== 'tiles')) {
     const tile = env.tileAt(env.layer(name), 0, 0);
     const asked = params(tile?.imgDiv?.src || '');
     const drawn = parseFloat(tile?.imgDiv?.style?.width || '');
+    const magnify = LAYERS[name].magnify ?? 1;
     if (!asked.WIDTH || !drawn) continue;
-    if (Number(asked.WIDTH) !== drawn ||
-        Number(asked.HEIGHT) !== parseFloat(tile.imgDiv.style.height)) {
+    if (Number(asked.WIDTH) * magnify !== drawn ||
+        Number(asked.HEIGHT) * magnify !== parseFloat(tile.imgDiv.style.height)) {
       scaled.push(`${name.replace('Geoportal - ', '')}: asked ${asked.WIDTH}x${asked.HEIGHT}, drawn ` +
-        `${drawn}x${parseFloat(tile.imgDiv.style.height)}`);
+        `${drawn}x${parseFloat(tile.imgDiv.style.height)} (x${magnify})`);
     }
   }
   report.check('every overlay is asked for at the size the map draws it, pixel for pixel or one half of it',

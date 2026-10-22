@@ -66,9 +66,10 @@ const BDOT_LAYERS = {
 /**
  * Every layer the script builds, in the order it defines them, with the properties
  * the suites check. Every WMS layer is asked for one image per cell of the editor's
- * own 256 px grid, at exactly the pixels the map draws it with - there is no
- * magnified request and no larger cell left (round 28: the whitening of the earlier
- * rounds could not survive a drawing that carries a white plate under its digits).
+ * own 256 px grid, at exactly the pixels the map draws it with - except the one
+ * drawing whose letters are the information (`podział adm`, round 29): it asks for a
+ * cell of `cell: 2048` at 1/`magnify` of its pixels, so the service draws its numbers
+ * twice as big and the filter turns them back into white ink with a black casing.
  * `contrast` is the one treatment a layer has: `outline` for the five boundary
  * layers, `dark`/`colour` for the roads and the BDOT surfaces, `false` for a layer
  * shown exactly as the service draws it. `kind: 'tiles'` is a WMTS/XYZ layer of the
@@ -125,7 +126,7 @@ const LAYERS = {
   'Geoportal - podział adm': {
     kind: 'grid', service: SERVICES.parcels, category: 'Podział Administracyjny',
     layers: 'dzialki,numery_dzialek', format: 'image/png', minZ: 15, singleTile: false,
-    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, contrast: false
+    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, magnify: 2, cell: 2048, contrast: 'white'
   },
   'Geoportal - Miasta': {
     kind: 'grid', service: SERVICES.border, category: 'Podział Administracyjny',
