@@ -1,63 +1,57 @@
-# geoportal.gov.pl layers for WME (WME SDK)
+# Warstwy geoportal.gov.pl dla WME (WME SDK)
 
-Skrypt wyświetla warstwy z Geoportalu w edytorze Waze. Wyświetlane warstwy to: ortofotomapa ("podkład satelitarny"), numery domów i nazwy miejscowości. Wersja 1.5.4 (2026-10-14) korzysta z oficjalnego WME SDK do inicjalizacji, odczytu stanu edytora i obsługi zdarzeń. Zachowuje dotychczasowy wygląd i położenie kontrolek w menu Warstwy.
+Skrypt wyświetla warstwy z Geoportalu w edytorze Waze: ortofotomapę („podkład satelitarny”), adresy i nazwy miejscowości, granice, drogi, przejazdy kolejowe, obiekty topograficzne oraz warstwy BDOT10k. Wersja 1.6.0 (2026-10-15) korzysta z oficjalnego WME SDK (v2.374, tryb asynchroniczny). Wygląd i położenie kontrolek w menu Warstwy bez zmian.
 
-Skrypt jest zbudowany na podstawie skryptu [geoportal.gov.pl layers for WME without translating PROXY](https://greasyfork.org/en/scripts/10611-geoportal-gov-pl-layers-for-wme-without-translating-proxy) autorstwa [Pawła Pyrczaka](https://greasyfork.org/en/users/9996-pawe%C5%82-pyrczak) oraz poprawek Stracha https://github.com/strah/WME-geoportal.pl oraz Kamila Maruda https://github.com/kmarud/WME-geoportal.pl
+Na podstawie skryptu [geoportal.gov.pl layers for WME without translating PROXY](https://greasyfork.org/en/scripts/10611-geoportal-gov-pl-layers-for-wme-without-translating-proxy) autorstwa [Pawła Pyrczaka](https://greasyfork.org/en/users/9996-pawe%C5%82-pyrczak) oraz poprawek Stracha https://github.com/strah/WME-geoportal.pl i Kamila Maruda https://github.com/kmarud/WME-geoportal.pl
 
-**Instalacja:** https://greasyfork.org/en/scripts/572377-geoportal-waze-integration-fork-by-snpl  
+**Instalacja:** https://greasyfork.org/en/scripts/572377-geoportal-waze-integration-fork-by-snpl
 
-Pliki źródłowe są dostępne na [Githubie](https://github.com/med-zz-eis/WME-geoportal.pl), zapraszam do forkowania/aktualizacji.
----
+## Jak używać
 
-The script displays Geoportal overlays in the WME ("satellite view", house numbers, cities names). Version 1.5.4 (2026-10-14) uses the official WME SDK for initialization, editor state, and events. The existing appearance and location of the controls in the Layers menu are retained.
+1. Zainstaluj skrypt w menedżerze skryptów (np. Tampermonkey) i otwórz Waze Map Editor.
+2. W panelu „Warstwy”, w karcie **-- Geoportal PL --**, włącz wybrane warstwy checkboxem. Suwak ustawia przezroczystość (0% wyłącza warstwę), a ustawienia zapisują się same.
+3. Warstwy są pogrupowane w zwijane kategorie.
 
-This script is based on [geoportal.gov.pl layers for WME without translating PROXY](https://greasyfork.org/en/scripts/10611-geoportal-gov-pl-layers-for-wme-without-translating-proxy) script by [Paweł Pyrczak](https://greasyfork.org/en/users/9996-pawe%C5%82-pyrczak) and Strah's adjustments https://github.com/strah/WME-geoportal.pl and Kamil Marud https://github.com/kmarud/WME-geoportal.pl
+## Uwagi
 
-**Installation:** https://greasyfork.org/en/scripts/572377-geoportal-waze-integration-fork-by-snpl
+* Warstwy BDOT10k, obiekty topograficzne i przejazdy kolejowe są rysowane w układzie 1992 (PUWG 1992) i mają dane tylko tam, gdzie publikuje je kompozycja BDOT10k, powiat (obiekty topograficzne) albo operator linii kolejowej.
+* Skrypt opiera się na WME SDK oraz na OpenLayers i prywatnym DOM menu Warstwy; przyszłe zmiany WME mogą wymagać aktualizacji (komunikaty `[Geoportal]` w konsoli przeglądarki).
+* Podział Administracyjny (numery działek, Miasta, gminy, powiaty, województwa, granica państwa) rysuje **lite białe litery z jednopikselową czarną obwódką**, dwa razy większe, bo o taki obraz skrypt prosi usługę (obrazki tych warstw obejmują 4× większy obszar mapy niż kafelki, żeby usługa rysowała mniej kopii tych samych podpisów). Atramentem jest **cały kształt, jaki narysowała usługa** — nie sam jego ciemny kontur, bo wtedy litery wychodziły puste i szare — a biała tabliczka pod numerem i półprzezroczyste kolorowe obszary warstw granic zostają takie, jak je narysowano.
+* Testy skryptu (jsdom + prawdziwy OpenLayers 2.13.1 + atrapa WME SDK) są w katalogu `test/` — `cd test && npm install && npm test`.
 
-The source file is hosted on [Github](https://github.com/med-zz-eis/WME-geoportal.pl), feel free to fork/update.
+## Changelog [1.6.0] - 2026-10-15
 
----
+* **BDOT i przejazdy w układzie 1992**: te usługi rysują dane tylko w tym układzie — pytane w 4326 zwracały obrazek własnego błędu, który zakrywał mapę („szare pola”, „Invalid CRS given (EPSG:4326).”).
+* **„Topografia / Inne” bez suwaków i czytelniejsze**: drogi, przejazdy i obiekty topograficzne mają sam checkbox, a cienkie ciemne linie i teksty dostają białą obwódkę i podbitą jasność, więc widać je na ciemnym podkładzie.
+* **Suwaki BDOT usunięte**: każda warstwa BDOT jest tylko włączana checkboxem i rysuje się w pełnej nieprzezroczystości.
+* **Błąd usługi to dziura, nie obrazek**: gdy usługa zwróci własny błąd, w tym miejscu nie pojawia się już szary obrazek z komunikatem („Invalid CRS given…”, „Error HRESULT E_FAIL…”), tylko pominięte miejsce, o które skrypt zapyta jeszcze raz.
+* **OSM, ortofoto, przejazdy i obiekty topograficzne na kafelkach**: nieudany kafelek to jedna dziura, przez którą widać podkład WME, a nie pusta warstwa albo obraz błędu na cały widok.
+* **Cały „Podział Administracyjny” czytelny**: nazwy granic proszą usługę o obraz w **jednej trzeciej** pikseli (trzy razy większe litery), a numery działek są rysowane **w skali 1:1 — bez powiększania**. Powiększanie numerów okazało się źródłem wszystkich wcześniejszych wad: usługa rysuje numer w rozmiarze własnym (8–10 px), więc rozciągnięcie nie powiększa cyfry, tylko ją rozmazuje — po interpolacji w przeglądarce z całego napisu zostaje kilkanaście pikseli pełnej bieli, a w odstępie między cyframi jasność nigdy nie spada poniżej połowy. Taki odstęp nie istnieje w danych, więc żaden próg nie może go otworzyć: cyfry się zlewają, a krawędzie się schodkują. W skali 1:1 rysunek przychodzi nietknięty — odstępy są prawdziwymi ciemnymi kolumnami, a otwory cyfr 0/4/6/8/9 prawdziwymi dziurami. **Numery działek to osobna warstwa**, bo linie działek są grubości jednego piksela i muszą być rysowane w rozmiarze mapy (pomniejszone trzy razy wychodzą przerywane). Linie idą osobnym obrazem 1:1, z niebieskim zamienionym na **czystą biel**. **Numery**: usługa rysuje numer **dwa razy** — sam kształt (biały, z cienkim ciemnym konturem) w pełnym kryciu, a wokół niego **miękką białą poświatę** na około 40 %. Ta poświata jest jednocześnie tą poświatą, którą było widać, i tym, co zlewa cyfry: liczona po jasności jest tak samo biała jak cyfra. Dlatego numer jest zamieniany na atrament **tylko tam, gdzie usługa narysowała go w pełnym kryciu** — poświata znika, zanim cokolwiek zostanie zalane. Białe wnętrze cyfry staje się czystą bielą, własny ciemny kontur usługi i odstępy między cyframi — czystą czernią, a czarna obwódka jest odrysowana na zewnątrz. Biel jest przy tym cięta **powyżej miękkiego zbocza** kreski, bo przy cięciu w połowie jasności to zbocze też stawało się białe i zamykało odstęp między cyframi. **Ciemny kontur cyfry i czarna obwódka są dobierane po kryciu rysunku, nie po pełnej nieprzezroczystości**: to kreski grubości jednego piksela, które usługa rysuje w połowie przezroczyste, więc przy pełnym kryciu ginęły — a razem z nimi jedyny ciemny odstęp między dwiema cyframi. Kontur jest więc brany po **podwojonym kryciu** (półprzezroczysta kreska liczy się jak pełna), a obwódka to czysta geometria rosnąca na zewnątrz kształtu, rysowana **bez żadnej bramki** — leży przecież poza tym, co usługa narysowała. **Nazwy granic**: utwardzony rysunek usługi — miękkie halo na czystą biel, miękkie litery na czystą czerń. Linie granic, kolorowe i półprzezroczyste obszary oraz tabliczki zostają takie, jakie narysowała usługa. Podgląd: `test/tools/filter-preview.mjs`.
+* **Pozostałe rysunki bez przerabiania**: adresy, ulice, place, przejazdy kolejowe i obiekty topograficzne są pokazywane dokładnie tak, jak rysuje je usługa (bez filtra, bez powiększania, w komórkach 256 px siatki edytora) — ulica jest w tym rysunku szeroką, półprzezroczystą powierzchnią, więc każda zmiana kolorów zamieniała ją w białą wstęgę, a numer domu w białą plamę.
+* **Kafelki wróciły**: działki, miejscowości, gminy, powiaty, województwa i granica państwa są znów kafelkami siatki mapy, tak jak ortofoto. Przesunięcie mapy w granicach marginesu nie wysyła ani jednego nowego żądania, a większe prosi tylko o pas, który odsłania — zamiast rysować od nowa cały widok przy każdym ruchu. Warstwy, które nie dają się narysować w całości na raz (przejazdy, BDOT), zostają jednobrazowe.
+* **Koniec podwójnych podpisów**: obraz należy do widoku, dla którego został narysowany. Gdy mapa prosi o inny obszar, poprzedni obraz jest zdejmowany od razu — wcześniej zostawał na mapie do czasu wczytania nowego, a jego napisy stały obok nowych, przesunięte o tyle, o ile przesunęła się mapa (to były „zdublowane” numery działek). Przy zmianie przybliżenia obraz nie jest przenoszony w ogóle. Warstwy bez suwaków pozostają bez suwaków.
+* **Bez zmian**: pozostałe warstwy, kategorie, checkboxy, suwaki i zapisane ustawienia.
+* **Ostrzeżenie**: usługi obiektów topograficznych i przejazdów mają dane tylko dla części kraju i tylko od pewnego przybliżenia.
 
-## Jak używać / How to use
+## Changelog [1.5.8] - 2026-10-15
 
-1. **Instalacja / Installation**: Zainstaluj skrypt za pomocą menedżera skryptów (np. Tampermonkey).
-2. **Uruchomienie / Startup**: Otwórz Waze Map Editor.
-3. **Warstwy / Layers**: W bocznym panelu "Warstwy" (pojawiającym się jako nowa karta) znajdziesz sekcję **"-- Geoportal PL --"**.
-4. **Włączanie / Toggling**: Kliknij checkbox lub po prostu przesuń suwak przezroczystości w prawo. Zmiana suwaka automatycznie aktywuje warstwę.
-5. **Przezroczystość / Opacity**: Ustawienie suwaka na 0% automatycznie wyłącza warstwę.
-6. **Kategorie / Categories**: Warstwy są pogrupowane w zwijane kategorie (Ortofoto, Adresy, Podział Adm, BDOT).
+* **Ortofoto high res: powrót do kafelków 256 px** — 512 px było w praktyce wolniejsze.
 
-## Zgodność z WME / WME compatibility
+## Changelog [1.5.6] - 2026-10-15
 
-**PL:** Skrypt czeka na `SDK_INITIALIZED` i gotowość edytora oraz sprawdza wymagane metody SDK. Nie korzysta już z prywatnych API `W.loginManager`, `W.map.getZoom`, `W.map.events` ani globalnego Lodash. Zachowuje dotychczasowe warstwy, adresy usług WMS, kategorie, checkboxy WME, suwaki i zapisane ustawienia. Obserwator przywraca te same kontrolki po ponownym utworzeniu karty Warstwy. Warstwy są tworzone dopiero po włączeniu i osiągnięciu wymaganego poziomu przybliżenia.
+* **Ortofoto na kafelkach siatki mapy** — standardowa z usługi kafelkowej, high res cięta na kafelki po stronie przeglądarki; nieudany kafelek to dziura w widoku.
 
-**EN:** The script waits for `SDK_INITIALIZED` and editor readiness and checks required SDK methods. It no longer uses the private `W.loginManager`, `W.map.getZoom`, `W.map.events` APIs or global Lodash. Existing layers, WMS endpoints, categories, WME checkboxes, sliders and saved settings are retained. An observer reattaches the same controls when WME recreates the Layers card. Layers are created only when enabled and at the required zoom level.
+## Changelog [1.5.5] - 2026-10-15
 
-**Ograniczenia / Limitations:** Dołączone typy SDK (`wme-sdk-typings.tgz`, `v2.374-5-g0024d1fa65`) opisują kafelki XYZ, ale nie WMS ani własne funkcje budowania adresów kafelków. Renderowanie WMS nadal wymaga `OpenLayers` oraz `W.map.addLayer` (lub mapy zwracanej przez `W.map.getOLMap()`). SDK LayerSwitcher udostępnia płaską listę checkboxów, a nie obecny układ kategorii i suwaków. Zachowanie wyglądu wymaga więc prywatnego DOM menu Warstwy i `wz-checkbox`. Te zależności są odizolowane w adapterach `WmsAdapter` i `LayerMenuAdapter`. Obsługiwane są alternatywne kontenery menu i zdarzenia checkboxów; brak wymaganych API lub przekroczenie limitu oczekiwania na inicjalizację jest zgłaszane w konsoli jako `[Geoportal]`. Nie można zagwarantować zgodności ze wszystkimi przyszłymi zmianami WME.
-
-The bundled SDK typings (`wme-sdk-typings.tgz`, `v2.374-5-g0024d1fa65`) describe XYZ tiles, but not WMS or custom tile URL callbacks. WMS rendering still needs `OpenLayers` and `W.map.addLayer` (or the map returned by `W.map.getOLMap()`). The SDK LayerSwitcher provides a flat checkbox list, not the existing categories and sliders. Preserving the appearance therefore still requires the private Layers-menu DOM and `wz-checkbox`. These dependencies are isolated in `WmsAdapter` and `LayerMenuAdapter`. Alternative menu containers and checkbox events are supported; missing required APIs and initialization timeouts are reported in the console with a `[Geoportal]` prefix. Compatibility with every future WME change cannot be guaranteed.
-
-**Weryfikacja / Verification:** Punktem odniesienia są dołączone typy SDK. Nie potwierdzono numeru najnowszego wdrożenia produkcyjnego ani działania w zalogowanej sesji WME — serwery Waze są niedostępne w środowisku weryfikacji. / The bundled SDK typings are the compatibility baseline. The latest production build number and operation in a logged-in WME session have not been verified; Waze servers are inaccessible from the validation environment.
-
-[Dokumentacja SDK / SDK documentation](https://www.waze.com/editor/sdk/)
-
-### Kontrola po aktualizacji WME / Check after a WME update
-
-1. Otwórz WME i sprawdź **Warstwy → -- Geoportal PL --**, również po zamknięciu i ponownym otwarciu karty Warstwy. / Open WME and check **Layers → -- Geoportal PL --**, including after closing and reopening the Layers card.
-2. Włącz ortofoto i adresy; sprawdź wyrównanie po przesunięciu mapy oraz znikanie/powrót adresów poniżej/od zoomu 14. / Enable orthophoto and addresses; check alignment after panning and address visibility below/at zoom 14.
-3. Sprawdź suwaki, checkboxy i zachowanie ustawień po przeładowaniu WME. / Check sliders, checkboxes and settings after reloading WME.
-4. Jeśli panel się nie pojawia, sprawdź komunikaty `[Geoportal]` w konsoli przeglądarki. / If the panel does not appear, check the browser console for `[Geoportal]` messages.
+* **WME SDK v2.374** w trybie asynchronicznym i odświeżanie widoczności na zdarzeniach (bez odpytywania).
+* **Odrzucony obraz wraca** (ponowienia 1 s i 3 s), a warstwy jednobrazowe trzymają na ekranie obraz, który już się wczytał.
+* **Ortofoto w JPEG** i jedno żądanie na widok zamiast siatki kafli.
 
 ## Changelog [1.5.4] - 2026-10-14
-* **WME SDK**: Inicjalizacja, stan użytkownika i zdarzenia mapy przez SDK. / SDK-based startup, user state and map events.
-* **Bez zmian wyglądu / Unchanged UI**: Dotychczasowe kontrolki pozostają w menu Warstwy; obsługa ponownego tworzenia karty i zdarzeń checkboxów. / Existing controls remain in the Layers menu; handle card recreation and checkbox events.
-* **Odporność / Resilience**: Sprawdzanie wymaganych API, odizolowane adaptery WMS i menu oraz komunikaty o niezgodności. / Required-API checks, isolated WMS and menu adapters and compatibility diagnostics.
-* **Zoom SDK**: Natychmiastowa aktualizacja widoczności i sprawdzanie bieżącego zoomu przy żądaniu kafelków, również przed zdarzeniem SDK; zachowana obsługa odpowiedzi asynchronicznych. / Immediate visibility updates and current-zoom checks on tile requests, including before SDK event delivery; promise-returning responses remain supported.
+
+* **WME SDK**: inicjalizacja, stan użytkownika i zdarzenia mapy przez SDK; izolacja błędów i zapasowe checkboxy.
 
 ## Changelog [1.5.0] - 2026-04-03
-*   **Wsparcie API Marzec 2026 / March 2026 API Support**: Kompatybilność z nowym systemem kart ("Draggable Cards").
-*   **MutationObserver**: Zwiekszenie stabilnosci renderowania menu przez WME.
-*   **Nowy interfejs UI / New UI layout**: Dodano suwaki przezroczystości pod nazwami warstw, dodano obsługę Dark Mode.
-*   **Wydajność / Performance**: Dodano lazy loading (ładowanie tylko włączonych warstw) oraz filtrację poziomów przybliżenia (zoom).
-*   **Pamięć ustawień / Settings Persistence**: Automatyczne zapisywanie włączonych warstw i przezroczystości.
+
+*   **Nowy interfejs WME** („Draggable Cards”), suwaki przezroczystości, zapis ustawień, tryb ciemny.
+*   **Wydajność**: ładowanie tylko włączonych warstw i filtrowanie poziomów przybliżenia.

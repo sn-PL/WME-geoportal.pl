@@ -1,0 +1,54 @@
+name: probe-raster
+
+# The sandbox this project is developed in cannot reach the Geoportal services - and cannot
+# download Actions artifacts either - so the one question that needs the real pixels, does a
+# parcel number grow when the service is asked for a bigger raster, is answered by running
+# the probe on a runner that can, and committing the pictures back to the branch it ran on.
+#
+#   push a change to test/live/probe-raster.cjs, or run this workflow by hand
+#
+# The pictures land in `probe-out/` on the same branch and are deleted once they have been
+# read; this is a probe, not a stage of the release.
+
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore: []
+    paths:
+      - 'test/live/probe-raster.cjs'
+      - '.github/workflows/probe-raster.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Ask the service for the same ground at several densities
+        run: |
+          set +e
+          mkdir -p probe-out
+          node test/live/probe-raster.cjs probe-out > probe-out/log.txt 2>&1
+          echo "probe exit: $?" >> probe-out/log.txt
+          cat probe-out/log.txt
+          ls -la probe-out >> probe-out/log.txt
+      - name: Keep every picture in the branch
+        run: |
+          set +e
+          git config user.name 'probe'
+          git config user.email 'probe@users.noreply.github.com'
+          git add -f probe-out
+          git commit -m 'probe-raster: the same ground at 384, 768 and 1440 px' >> probe-out/log.txt 2>&1
+          echo "commit exit: $?" >> probe-out/log.txt
+          git push origin HEAD:${GITHUB_REF_NAME} >> probe-out/log.txt 2>&1
+          echo "push exit: $?" >> probe-out/log.txt
+          git add -f probe-out
+          git commit -m 'probe-raster: what the run reported' >> /dev/null 2>&1 || true
+          git push origin HEAD:${GITHUB_REF_NAME} || true
+          tail -20 probe-out/log.txt

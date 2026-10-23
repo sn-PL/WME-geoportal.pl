@@ -1,0 +1,52 @@
+ok      same-ground-384 200 image/png 5783 B 384x384
+ok      same-ground-768 200 image/png 7447 B 768x768
+ok      same-ground-1440 200 image/png 9381 B 1440x1440
+ok      same-ground-768-again 200 image/png 7447 B 768x768
+ok      twice-the-ground-768 200 image/png 15878 B 768x768
+ok      half-the-ground-768 200 image/png 4289 B 768x768
+ok      both-layers-768 200 image/png 35333 B 768x768
+ok      both-layers-1440 200 image/png 67128 B 1440x1440
+
+GET with the editor as Origin: 200
+  vary: Accept-Encoding
+  content-type: text/xml; subtype=gml/3.1.1; charset=UTF-8
+  content-length: 2552
+
+OPTIONS preflight: 200
+  vary: Accept-Encoding
+  content-type: text/html
+  content-length: 202
+
+8 pictures, 0 refused, into /home/runner/work/WME-geoportal.pl/WME-geoportal.pl/probe-out
+probe exit: 0
+total 188
+drwxr-xr-x 2 runner runner  4096 Oct 23 14:06 .
+drwxr-xr-x 8 runner runner  4096 Oct 23 14:06 ..
+-rw-r--r-- 1 runner runner 67128 Oct 23 14:06 both-layers-1440.png
+-rw-r--r-- 1 runner runner 35333 Oct 23 14:06 both-layers-768.png
+-rw-r--r-- 1 runner runner   237 Oct 23 14:06 cors.txt
+-rw-r--r-- 1 runner runner  4289 Oct 23 14:06 half-the-ground-768.png
+-rw-r--r-- 1 runner runner  4408 Oct 23 14:06 index.json
+-rw-r--r-- 1 runner runner   791 Oct 23 14:06 log.txt
+-rw-r--r-- 1 runner runner  9381 Oct 23 14:06 same-ground-1440.png
+-rw-r--r-- 1 runner runner  5783 Oct 23 14:06 same-ground-384.png
+-rw-r--r-- 1 runner runner  7447 Oct 23 14:06 same-ground-768-again.png
+-rw-r--r-- 1 runner runner  7447 Oct 23 14:06 same-ground-768.png
+-rw-r--r-- 1 runner runner 15878 Oct 23 14:06 twice-the-ground-768.png
+[arena/ced3c663-wme-geoportal-pl 4c9b1dd] probe-raster: the same ground at 384, 768 and 1440 px
+ 11 files changed, 158 insertions(+)
+ create mode 100644 probe-out/both-layers-1440.png
+ create mode 100644 probe-out/both-layers-768.png
+ create mode 100644 probe-out/cors.txt
+ create mode 100644 probe-out/half-the-ground-768.png
+ create mode 100644 probe-out/index.json
+ create mode 100644 probe-out/log.txt
+ create mode 100644 probe-out/same-ground-1440.png
+ create mode 100644 probe-out/same-ground-384.png
+ create mode 100644 probe-out/same-ground-768-again.png
+ create mode 100644 probe-out/same-ground-768.png
+ create mode 100644 probe-out/twice-the-ground-768.png
+commit exit: 0
+To https://github.com/sn-PL/WME-geoportal.pl
+   c01a3c0..4c9b1dd  HEAD -> arena/ced3c663-wme-geoportal-pl
+push exit: 0
