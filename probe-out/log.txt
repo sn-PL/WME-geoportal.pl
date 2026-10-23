@@ -33,3 +33,20 @@ drwxr-xr-x 8 runner runner  4096 Oct 23 14:06 ..
 -rw-r--r-- 1 runner runner  7447 Oct 23 14:06 same-ground-768-again.png
 -rw-r--r-- 1 runner runner  7447 Oct 23 14:06 same-ground-768.png
 -rw-r--r-- 1 runner runner 15878 Oct 23 14:06 twice-the-ground-768.png
+[arena/ced3c663-wme-geoportal-pl 4c9b1dd] probe-raster: the same ground at 384, 768 and 1440 px
+ 11 files changed, 158 insertions(+)
+ create mode 100644 probe-out/both-layers-1440.png
+ create mode 100644 probe-out/both-layers-768.png
+ create mode 100644 probe-out/cors.txt
+ create mode 100644 probe-out/half-the-ground-768.png
+ create mode 100644 probe-out/index.json
+ create mode 100644 probe-out/log.txt
+ create mode 100644 probe-out/same-ground-1440.png
+ create mode 100644 probe-out/same-ground-384.png
+ create mode 100644 probe-out/same-ground-768-again.png
+ create mode 100644 probe-out/same-ground-768.png
+ create mode 100644 probe-out/twice-the-ground-768.png
+commit exit: 0
+To https://github.com/sn-PL/WME-geoportal.pl
+   c01a3c0..4c9b1dd  HEAD -> arena/ced3c663-wme-geoportal-pl
+push exit: 0
