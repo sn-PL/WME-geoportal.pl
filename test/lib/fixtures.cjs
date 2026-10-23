@@ -131,10 +131,11 @@ const LAYERS = {
     ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, cell: 2048, contrast: 'white',
     // round 35: the lines and the numbers are asked for separately, because a boundary
     // line is one pixel of the service's raster and must be drawn at the size of the
-    // map, while a number only reads when the service draws it bigger. Round 37: the
-    // numbers have a factor of their own (2.5), a little smaller than the names' three,
-    // so that they read as digits rather than as one heavy bar
-    companion: { layers: 'numery_dzialek', magnify: 2.5, contrast: 'numerals' }
+    // map. Round 40: the numbers too are now asked for at one image pixel per pixel of
+    // the map - the service draws a number at a size of its own whatever the raster, so
+    // stretching only smears it - and their cell is small enough (1024 px, not 2048) that
+    // the request stays inside the megapixel cap and is never shrunk and stretched again
+    companion: { layers: 'numery_dzialek', magnify: 1, cell: 1024, contrast: 'numerals' }
   },
   'Geoportal - Miasta': {
     kind: 'grid', service: SERVICES.border, category: 'Podział Administracyjny',

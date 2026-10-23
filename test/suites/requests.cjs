@@ -185,8 +185,12 @@ module.exports = async function requests(report) {
       const numbers = env.registry[name].companion;
       const numberRequests = env.requestsOf(numbers);
       const numberSizes = [...new Set(numberRequests.map(url => `${params(url).WIDTH}x${params(url).HEIGHT}`))];
-      const numberSide = Math.min(cap, Math.round(cell / companion.magnify));
-      report.check(`the numbers of “${name}” are their own layer, asked for at 1/${companion.magnify} of the cell`,
+      // round 40: the numbers have a cell of their own, small enough that the request is
+      // never shrunk to the megapixel cap - the stretch of a shrunk request is what made
+      // "magnify 1" look exactly like "magnify 2.5"
+      const numberCell = companion.cell ?? cell;
+      const numberSide = Math.min(cap, Math.round(numberCell / companion.magnify));
+      report.check(`the numbers of “${name}” are their own layer, asked for at 1/${companion.magnify} of a ${numberCell} px cell`,
         numberRequests.length > 0 && numberSizes.length === 1 &&
         numberSizes[0] === `${numberSide}x${numberSide}` &&
         params(numberRequests[0]).LAYERS === companion.layers,

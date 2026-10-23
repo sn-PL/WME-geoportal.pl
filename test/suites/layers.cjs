@@ -148,12 +148,29 @@ module.exports = async function layers(report) {
         companion.contrast === 'numerals';
     })(),
     `dzialki at 1:1 with the white-lines filter, numery_dzialek at 1/${env.internals.LABEL_NUMBER_MAGNIFY} with the numerals filter`);
-  // Round 37: the numbers are stretched a little less than the names. A number is a row of
-  // digits; past three the digits stop reading as digits and the row reads as one bar.
-  report.check('the parcel numbers are stretched less than the boundary names, and still magnified',
-    env.internals.LABEL_NUMBER_MAGNIFY > 1 &&
-    env.internals.LABEL_NUMBER_MAGNIFY < env.internals.LABEL_MAGNIFY,
-    `numbers ${env.internals.LABEL_NUMBER_MAGNIFY}x, names ${env.internals.LABEL_MAGNIFY}x`);
+  // Round 40: the numbers are not stretched at all, and their cell is small enough that
+  // the request is never shrunk to the megapixel cap either. Both halves matter: a cell of
+  // 2048 at magnify 1 asks for 2048 px, the cap shrinks that to 1095, and the layer then
+  // stretches the answer 1.87 times - which is why turning the magnification down used to
+  // change nothing on the map. Measured on such a stretch: of a nine pixel number only
+  // fourteen pixels keep an alpha of 1, and in the gap between two digits the alpha never
+  // falls below a half, so no gate can open the gap the report keeps asking about.
+  report.check('the parcel numbers are drawn at one image pixel per pixel of the map',
+    (() => {
+      if (!env.internals.layers) return false;
+      const definition = env.internals.layers['Geoportal - podział adm']?.definition;
+      const companion = definition?.options?.companion;
+      const cell = companion?.tileSize;
+      const cap = env.internals.MAX_VIEW_PIXELS;
+      return env.internals.LABEL_NUMBER_MAGNIFY === 1 &&
+        companion?.magnify === 1 &&
+        // the whole cell fits inside the megapixel cap, so the request is never shrunk
+        Number.isFinite(cell) && cell * cell <= cap &&
+        cell < env.internals.LABEL_CELL;
+    })(),
+    `numbers ${env.internals.LABEL_NUMBER_MAGNIFY}x in a ${env.internals.LABEL_NUMBER_CELL} px cell ` +
+    `(cap ${env.internals.MAX_VIEW_PIXELS} px), names ${env.internals.LABEL_MAGNIFY}x in ` +
+    `${env.internals.LABEL_CELL} px`);
   // The white of a digit is cut above the soft shoulder the service paints around a stroke:
   // at a half that shoulder turned white and closed the gap between two digits.
   report.check('the body of a digit is cut above the service\'s soft shoulder',
