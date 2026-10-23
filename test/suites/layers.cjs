@@ -195,31 +195,34 @@ module.exports = async function layers(report) {
         order.includes('black') && order[order.length - 1] === 'white';
     })(),
     'solid = alpha >= 3/4; the white body and the drawing that comes back are bounded by it');
-  // Round 38: the outline and the ring are strokes one pixel wide, so the service draws
-  // them at a partial alpha - the same alpha as its halo. Gating them on full opacity
-  // deleted them, and with them the only thing that kept two digits apart. A dark cut
-  // cannot keep a white pixel, so they can be gated on the drawing's own coverage.
-  report.check('the dark outline and the ring survive a stroke thinner than full opacity',
+  // Round 38/39: the outline and the casing are strokes one pixel wide, drawn at about
+  // half opacity. The coverage ramp is zero there (its knee is at three quarters), so the
+  // dark mask lost the outline itself; and the casing is geometry, grown out of the white
+  // mask - it lies outside the drawing altogether, where there is nothing to be gated on.
+  report.check('the dark outline and the casing survive a stroke thinner than full opacity',
     (() => {
       if (!numerals) return false;
-      const cov = transfer(numerals, 'cov');
-      const slope = cov?.querySelector('feFuncA');
+      const ink = transfer(numerals, 'ink')?.querySelector('feFuncA');
       const gateOf = name => [...numerals.querySelectorAll('feComposite')]
         .filter(c => c.getAttribute('result') === name)
         .map(c => c.getAttribute('in2'));
       const order = merged(numerals);
-      return !!slope && gateOf('blkm').includes('cov') && gateOf('ringm').includes('cov') &&
-        !gateOf('blkm').includes('solid') && !gateOf('ringm').includes('solid') &&
-        // both still work on their own discrete cut of the luminance
+      return !!ink && ink.getAttribute('type') === 'linear' &&
+        Number(ink.getAttribute('slope')) >= 2 &&
+        // the dark mask is bounded by that doubling, not by full opacity
+        gateOf('blkm').includes('ink') && !gateOf('blkm').includes('solid') &&
+        // the casing is grown geometry: flood over the ring itself, with no gate
+        [...numerals.querySelectorAll('feComposite')]
+          .some(c => c.getAttribute('result') === 'casing' && c.getAttribute('in2') === 'ring0') &&
+        // and both still work on their own discrete cut of the luminance
         transfer(numerals, 'blkb') !== null &&
-        // the outline is the service's dark pixels minus the white body, and it is merged
         [...numerals.querySelectorAll('feComposite')]
           .some(c => c.getAttribute('result') === 'outlinem' &&
             c.getAttribute('in') === 'blkm' && c.getAttribute('in2') === 'whitem' &&
             c.getAttribute('operator') === 'out') &&
         order.includes('black');
     })(),
-    'blackm and ringm bounded by cov, the outline = dark minus white, merged under the white');
+    'ink = alpha doubled; dark mask bounded by it, casing drawn straight from the ring');
   report.check('the numerals are given more contrast without losing their shape',
     (() => {
       if (!numerals) return false;
