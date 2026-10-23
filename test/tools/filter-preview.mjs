@@ -4,14 +4,14 @@
  * ortho photo, in one box of the same size each:
  *
  *   - as the service draws the cell at its own size (no filter) - the reference,
- *   - as the versions of rounds 23-27 showed it (every pixel of the drawing turned
- *     into white ink by its coverage alone - the white blob of a parcel number that
- *     the report of 10.2026 caught, because the plate under the digits is opaque too),
- *   - as the script shows it now (round 29: the parcel numbers are keyed on DARKNESS,
- *     so the digits come through and the plate does not, drawn twice the size from a
- *     cell of 2048 px and turned into white ink with a black casing; every other
- *     drawing is shown exactly as the service draws it, with only the casing of the
- *     boundary layers or the lift of the roads and the BDOT).
+ *   - as round 31 showed it (the parcel numbers inked from the whole silhouette with a
+ *     grown casing, the boundary names grown from their dark key - the fused white
+ *     bars and the white boundary lines of the report of 10.2026),
+ *   - as the script shows it now (round 32: the ink is a hard cut of the drawing's own
+ *     luminance and nothing is grown - a number is its white digits and their own dark
+ *     outline, a boundary name is its dark letters flooded white with a one pixel ring
+ *     and the service's halo left as drawn; every other drawing is shown exactly as
+ *     the service draws it, with only the lift of the roads and the BDOT).
  *
  * The drawings are loaded straight from the Geoportal, for the address the script's
  * own request has, and both treatments use the script's own filter strings, so what
@@ -104,9 +104,9 @@ for (const name of SHOW) {
   // rounds 24-29 for the boundary layers. For every drawing the script leaves alone it
   // shows the same treatment the script uses.
   const previous = kind === 'white'
-    ? { css: 'brightness(0) invert(1) url(#geoportal-previous)', caption: 'poprzednio (rundy 23-27) &mdash; bielenie po kryciu: tabliczka i cyfry w jedn&#261; bia&#322;&#261; plam&#281;' }
+    ? { css: 'url(#geoportal-r31-ink)', caption: 'poprzednio (runda 31) &mdash; atrament z ca&#322;ej sylwetki plus obw&oacute;dka: cyfry i linie w jedn&#261; bia&#322;&#261; plam&#281;' }
     : kind === 'names'
-      ? { css: 'drop-shadow(0 0 1px #000) drop-shadow(0 0 1px #000)', caption: 'poprzednio (rundy 24-29) &mdash; rysunek us&#322;ugi + czarna obw&oacute;dka' }
+      ? { css: 'url(#geoportal-r31-names)', caption: 'poprzednio (runda 31) &mdash; ciemny klucz + pogrubienie: nazwy i linie granic bia&#322;e' }
       : kind
         ? { css: filters[kind], caption: 'bez zmian od rundy 20 &mdash; rozja&#347;nienie i bia&#322;a kraw&#281;d&#378;' }
         : { css: 'none', caption: 'od rundy 28: dok&#322;adnie rysunek us&#322;ugi, bez filtra' };
@@ -157,10 +157,11 @@ const html = `<!doctype html>
   /* What round 23 did: the alpha threshold applied to the whole drawing, which
      hardened the wide white halo the boundary service draws under its names into one
      pale slab and left the letters inside it barely darker than the slab. */
-  /* The previous round: the same white re-draw and the same one pixel casing, but the
-     threshold straight onto the doubled raster - every edge of the service's pixel a
-     step of two screen pixels, which is the ragged lettering of the report. The filter
-     string comes per row, so the middle column says what each layer actually did. */
+  /* The column of the round before: the filters the script shipped as 1.6.0 up to round
+     31, carried verbatim - the parcel numbers inked from their whole silhouette with a
+     grown casing, which fused the digits, and the boundary names grown from the dark key,
+     which whitened the boundary lines. Side by side with the current filters they are the
+     comparison of the report of 10.2026. */
   /* What the script does now: the image of half the pixels, which the service drew
      twice as large, stretched back over the cell and put through the filter of the
      layer's own kind - the letters white, the contour smoothed, every edge snapped
@@ -168,14 +169,11 @@ const html = `<!doctype html>
   .now :is(.over) { }
 </style>
 ${svg}
-<svg id="geoportal-previous-filter" width="0" height="0" style="position:absolute;left:0;top:0;pointer-events:none">
-  <defs><filter id="geoportal-previous" x="-20%" y="-20%" width="140%" height="140%"
-    color-interpolation-filters="sRGB"><feFlood flood-color="#fff" result="w"/>
-    <feComposite in="w" in2="SourceGraphic" operator="in" result="white"/>
-    <feComponentTransfer in="white" result="ink"><feFuncA type="linear" slope="8"
-    intercept="-3.4"/></feComponentTransfer><feMorphology in="ink" operator="dilate" radius="1"
-    result="grown"/><feFlood flood-color="#000" result="black"/><feComposite in="black" in2="grown"
-    operator="in" result="casing"/><feMerge><feMergeNode in="casing"/><feMergeNode in="ink"/></feMerge></filter></defs>
+<svg id="geoportal-r31-filter" width="0" height="0" style="position:absolute;left:0;top:0;pointer-events:none">
+  <defs>
+    <filter id="geoportal-r31-ink" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB"><feColorMatrix in="SourceGraphic" type="matrix" result="key" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  -0.299 -0.587 -0.114 0 1"/><feComposite in="key" in2="SourceGraphic" operator="in" result="dark"/><feComponentTransfer in="dark" result="darkbin"><feFuncA type="linear" slope="10" intercept="-3"/></feComponentTransfer><feComponentTransfer in="SourceAlpha" result="cov"><feFuncA type="linear" slope="20" intercept="-10"/></feComponentTransfer><feComponentTransfer in="darkbin" result="notdark"><feFuncA type="table" tableValues="1 0"/></feComponentTransfer><feMorphology in="cov" operator="erode" radius="16" result="core"/><feMorphology in="core" operator="dilate" radius="16" result="field"/><feComposite in="field" in2="notdark" operator="in" result="plate"/><feComposite in="cov" in2="plate" operator="out" result="labels"/><feMorphology in="labels" operator="dilate" radius="2" result="grown"/><feFlood flood-color="#000" result="black"/><feComposite in="black" in2="grown" operator="in" result="casing"/><feFlood flood-color="#fff" result="white"/><feComposite in="white" in2="labels" operator="in" result="whiteink"/><feGaussianBlur in="SourceGraphic" stdDeviation="1.6" result="draw"/><feMerge><feMergeNode in="draw"/><feMergeNode in="casing"/><feMergeNode in="whiteink"/></feMerge></filter>
+    <filter id="geoportal-r31-names" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB"><feColorMatrix in="SourceGraphic" type="matrix" result="key" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  -0.299 -0.587 -0.114 0 1"/><feComposite in="key" in2="SourceGraphic" operator="in" result="dark"/><feComponentTransfer in="dark" result="darkbin"><feFuncA type="linear" slope="10" intercept="-3"/></feComponentTransfer><feComponentTransfer in="SourceAlpha" result="cov"><feFuncA type="linear" slope="20" intercept="-10"/></feComponentTransfer><feComponentTransfer in="darkbin" result="notdark"><feFuncA type="table" tableValues="1 0"/></feComponentTransfer><feMorphology in="darkbin" operator="dilate" radius="2" result="fat"/><feComposite in="cov" in2="fat" operator="in" result="labels"/><feComponentTransfer in="labels" result="notlabels"><feFuncA type="table" tableValues="1 0"/></feComponentTransfer><feComposite in="cov" in2="notlabels" operator="in" result="halo"/><feMorphology in="labels" operator="dilate" radius="2" result="grown"/><feFlood flood-color="#000" result="black"/><feComposite in="black" in2="grown" operator="in" result="casing"/><feFlood flood-color="#fff" result="white"/><feComposite in="white" in2="labels" operator="in" result="whiteink"/><feComposite in="SourceGraphic" in2="cov" operator="out" result="areas"/><feMerge><feMergeNode in="areas"/><feMergeNode in="casing"/><feMergeNode in="halo"/><feMergeNode in="whiteink"/></feMerge></filter>
+  </defs>
 </svg>
 </head>
 <body>
@@ -183,28 +181,27 @@ ${svg}
 <p class="lead">
   Trzy razy ten sam kawa&#322;ek mapy, w ramkach tej samej wielko&#347;ci:
   <b>tak rysuje us&#322;uga</b> (obraz 1:1, bez filtra),
-  <b>tak by&#322;o poprzednio</b> (bielenie po kryciu &mdash; z numeru dzia&#322;ki
-  zostawa&#322;a bia&#322;a plama, bo tabliczka pod cyframi te&#380; jest nieprzezroczysta) i
-  <b>tak jest teraz</b> (bia&#322;y jest ca&#322;y kszta&#322;t litery, nie sam jej kontur,
-  wi&#281;c cyfry s&#261; lite, z jednopikselow&#261; czarn&#261; obw&oacute;dk&#261;;
-  tabliczka i linie dzia&#322;ek zostaj&#261; jak w us&#322;udze).
+  <b>tak by&#322;o w rundzie 31</b> (atrament z ca&#322;ej sylwetki plus pogrubiona
+  obw&oacute;dka &mdash; cyfry, linie i nazwy zlewa&#322;y si&#281; w jedn&#261; bia&#322;&#261; plam&#281;) i
+  <b>tak jest teraz</b> (ostry pr&oacute;g na jasno&#347;ci rysunku, nic nie jest
+  pogrubiane: cyfra to jej bia&#322;e wype&#322;nienie i w&#322;asny ciemny kontur,
+  nazwa granicy to ciemne litery na bia&#322;o z jednopikselow&#261; obw&oacute;dk&#261;,
+  a halo, linie i przezroczyste obszary zostaj&#261; jak w us&#322;udze).
   Miejsce: Imbramowice, ${centre.lat.toFixed(5)}, ${centre.lon.toFixed(5)}.
 </p>
 <fieldset><legend>Podgl&#261;d</legend>
   <label>powi&#281;kszenie ramki <input id="z" type="range" min="1" max="3" step="1" value="2">
     <code id="zx">2&times;</code></label>
   <div class="note">Trzecia kolumna u&#380;ywa filtr&oacute;w, kt&oacute;re skrypt ma teraz:
-    <code>white</code> (numery dzia&#322;ek) i <code>names</code> (nazwy granic):
-    ca&#322;y kszta&#322;t litery na bia&#322;o z jednopikselow&#261; czarn&#261;
-    obw&oacute;dk&#261; (a nie sam kontur, kt&oacute;ry dawa&#322; puste, szare litery),
-    obraz z kom&oacute;rki 2048 px w po&#322;owie pikseli, wi&#281;c litery s&#261; dwa razy
-    wi&#281;ksze, a tabliczki i kolorowe obszary zostaj&#261; jak w us&#322;udze, a nazwy
-    granic dostaj&#261; czarn&#261; obw&oacute;dk&#281; zamiast bia&#322;ego halo,
+    <code>white</code> (numery dzia&#322;ek) i <code>names</code> (nazwy granic) &mdash;
+    oba ci&#281;te twardym progiem, bez morfologii, wi&#281;c nie ma czego zlewa&#263;;
+    obraz z kom&oacute;rki 2048 px w po&#322;owie pikseli (litery s&#261; dwa razy wi&#281;ksze),
+    tabliczki, linie dzia&#322;ek i przezroczyste obszary zostaj&#261; jak w us&#322;udze;
     <code>dark</code> i <code>colour</code> (drogi, BDOT: rozja&#347;nienie) &mdash;
     a adresy, ulice, place, przejazdy i obiekty topograficzne <b>nie maj&#261;
-    &#380;adnego filtra</b>. Rundy 23&ndash;27 bieli&#322;y ca&#322;y rysunek po kryciu
-    (kolumna &bdquo;poprzednio&rdquo;): tabliczka pod numerem jest nieprzezroczysta,
-    wi&#281;c z numeru zostawa&#322;a bia&#322;a plama.</div>
+    &#380;adnego filtra</b>. &#346;rodkowa kolumna to filtry rundy 31, do&#322;&#261;czone
+    dos&#322;ownie: wtedy cyfry i nazwy zlewa&#322;y si&#281; w jedn&#261; bia&#322;&#261; plam&#281;
+    i bielone by&#322;y te&#380; linie granic.
 </fieldset>
 ${rows.map(row => `<div class="row">
   <h2>${row.name}<small>${row.kind ? `filtr: ${row.kind}` : 'bez filtra'} &middot; ${row.detail}</small></h2>
