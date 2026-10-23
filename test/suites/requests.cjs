@@ -151,15 +151,20 @@ module.exports = async function requests(report) {
 
   // Sizes: every WMS cell asks for exactly the pixels the map draws it with - one
   // pixel of the service per pixel of the map, in a cell of the editor's own 256 px
-  // grid - except the one drawing whose letters are the information (`podział adm`,
-  // round 29): it asks for a cell of 2048 px at half its pixels, so the service draws
-  // its numbers twice as big and the filter makes them white ink. The BDOT switches
+  // grid - except the six drawings whose letters are the information: they ask for a
+  // cell of 2048 px at 1/LABEL_MAGNIFY of its pixels, so the service draws its numbers
+  // and names that many times as big and the filter makes them white ink. Round 33
+  // raised the factor to three: at two the service's own soft edge was as wide on
+  // screen as the gap between two digits, and the gaps closed. The BDOT switches
   // ask for the view itself (ratio 1) and the road layer for the view plus its margin,
   // and nothing goes past the megapixel the composition refuses.
   for (const name of LAYER_ORDER.filter(name => LAYERS[name].kind === 'grid')) {
     const magnify = LAYERS[name].magnify ?? 1;
     const cell = LAYERS[name].cell ?? 256;
-    const want = `${cell / magnify}x${cell / magnify}`;
+    // the request is rounded to whole pixels, so a factor that does not divide the cell
+    // evenly is off by at most one
+    const side = Math.round(cell / magnify);
+    const want = `${side}x${side}`;
     const requests = env.requestsOf(env.layer(name));
     const sizes = [...new Set(requests.map(url => `${params(url).WIDTH}x${params(url).HEIGHT}`))];
     report.check(`“${name}” asks for cells of ${cell} px of map, at 1/${magnify} of the pixels of the cell it draws`,
@@ -200,13 +205,14 @@ module.exports = async function requests(report) {
     const drawn = parseFloat(tile?.imgDiv?.style?.width || '');
     const magnify = LAYERS[name].magnify ?? 1;
     if (!asked.WIDTH || !drawn) continue;
-    if (Number(asked.WIDTH) * magnify !== drawn ||
-        Number(asked.HEIGHT) * magnify !== parseFloat(tile.imgDiv.style.height)) {
+    const slack = 1;   // the request is rounded to whole pixels
+    if (Math.abs(Number(asked.WIDTH) * magnify - drawn) > slack ||
+        Math.abs(Number(asked.HEIGHT) * magnify - parseFloat(tile.imgDiv.style.height)) > slack) {
       scaled.push(`${name.replace('Geoportal - ', '')}: asked ${asked.WIDTH}x${asked.HEIGHT}, drawn ` +
         `${drawn}x${parseFloat(tile.imgDiv.style.height)} (x${magnify})`);
     }
   }
-  report.check('every overlay is asked for at the size the map draws it, pixel for pixel or one half of it',
+  report.check('every overlay is asked for at the size the map draws it, pixel for pixel or by the label factor',
     scaled.length === 0, scaled.join(' | ') || `${LAYER_ORDER.length} layers, no other stretched image among them`);
 
   const railRequests = env.requestsOf(env.layer('Geoportal - przejazdy kolejowe (wymagany duży zoom)'));

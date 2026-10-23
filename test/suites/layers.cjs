@@ -112,92 +112,99 @@ module.exports = async function layers(report) {
   const composite = (filter, result) => [...filter.querySelectorAll('feComposite')]
     .find(c => c.getAttribute('result') === result);
   const funcOf = (filter, result) => transfer(filter, result)?.querySelector('feFuncA');
+  // where a linear stretch of the luminance reaches a half - the point a `discrete` cut
+  // switches at. alpha = slope * lum + intercept, so the cut is (1/2 - b) / a.
+  const cutAt = (filter, result) => {
+    const f = funcOf(filter, result);
+    if (!f) return NaN;
+    const a = Number(f.getAttribute('slope'));
+    const b = Number(f.getAttribute('intercept'));
+    return a === 0 ? NaN : (0.5 - b) / a;
+  };
   const cutOf = t => {
     if (!t) return NaN;
     if (t.getAttribute('type') === 'discrete') return 0.5;    // discrete switches at a half
     return -Number(t.getAttribute('intercept')) / Number(t.getAttribute('slope'));
   };
-  // Round 32: no morphology on the ink and no growth at all - the report of 10.2026 was
-  // that the type "merges and is unreadable", and every grown casing was what merged it.
-  report.check('nothing is grown around the ink: the filters only recolour what the service drew',
+  // Round 33: the parcels need a casing (a white digit on a pale roof is invisible), and
+  // it has to be born OUTSIDE the glyph - grown from the mask and taken out of it - so it
+  // can never close the gap to the digit beside it. The names grow nothing at all.
+  report.check('the parcel casing is one ring grown out of the digits, and the names grow nothing',
     !!ink && !!namesInk &&
-    ink.querySelectorAll('feMorphology').length === 0 &&
-    // the names keep exactly one morphology: the one pixel ring grown from the letters and
-    // taken out of the mask before it is used, so it cannot widen a letter
-    [...namesInk.querySelectorAll('feMorphology')].every(m =>
-      m.getAttribute('operator') === 'dilate' && Number(m.getAttribute('radius')) === 1),
-    'the parcel filter has no morphology; the names grow one ring of a single pixel, from the mask');
+    namesInk.querySelectorAll('feMorphology').length === 0 &&
+    ink.querySelectorAll('feMorphology').length === 1 &&
+    [...ink.querySelectorAll('feMorphology')].every(m =>
+      m.getAttribute('operator') === 'dilate' && m.getAttribute('result') === 'fat') &&
+    (() => {
+      const ring = composite(ink, 'ring0');
+      const order = merged(ink);
+      // the ring is `fat` minus `whitem`: it never covers a glyph, and it is merged UNDER
+      // the white, so it can only darken the map around the drawing
+      return !!ring && ring.getAttribute('operator') === 'out' &&
+        ring.getAttribute('in') === 'fat' && ring.getAttribute('in2') === 'whitem' &&
+        order[0] === 'casing' && order[order.length - 1] === 'white';
+    })(),
+    'one dilate of the ink mask, the ring taken out of it and merged under the white');
   // The white is a flood over a hard cut of the drawing's own luminance, i.e. the letters
-  // are 255 white from edge to edge and the grey of the report is impossible.
+  // are 255 white from edge to edge and the grey of the round-31 report is impossible.
   report.check('a letter is a flood of pure white over a hard cut - never a grey ramp',
     (() => {
       if (!ink || !namesInk) return false;
       const hard = (filter) => [...filter.querySelectorAll('feFuncA')]
         .some(f => f.getAttribute('type') === 'discrete');
       const flood = (filter, colour) => filter.querySelector(`feFlood[flood-color="${colour}"]`) !== null;
-      return hard(ink) && hard(namesInk) && flood(ink, '#fff') && flood(namesInk, '#fff') &&
-        flood(namesInk, '#000');
+      return hard(ink) && hard(namesInk) && flood(ink, '#fff') && flood(ink, '#000') &&
+        flood(namesInk, '#fff') && flood(namesInk, '#000');
     })(),
-    'every mask is cut with a discrete transfer, and the ink is a flood of #fff');
-  // A number is white digits with a one pixel dark outline drawn by the service: the white
-  // is the bright side of the drawing, the black is the dark side - the outline is already
-  // the casing and the separator, at the width and the distance the service chose.
-  report.check('the digits are the bright side of the drawing and their own outline is the dark side',
+    'every mask is cut with a discrete transfer, and every flood is #fff or #000');
+  // Round 33: the service draws a digit in a stroke one pixel wide and wraps it in a soft
+  // edge of its own; at a cut of a half that edge is promoted to white and every gap
+  // between two digits closes into the slab of the report. The white is cut high - above
+  // the soft edge - and the dark side at a half brings the gaps back as black.
+  report.check('the digits are cut high enough to reject the service\'s soft edge',
     (() => {
       if (!ink) return false;
       const white = funcOf(ink, 'whitea');
       const black = funcOf(ink, 'blacka');
-      // white := luminance (bright is ink); black := 1 - luminance (dark is ink)
-      // `white` is the bright side: its stretch goes UP with the luminance, so the
-      // discrete cut keeps what is bright; `black` is the dark side: the stretch goes down
+      const whiteCut = cutAt(ink, 'whitea');
       const bright = white && Number(white.getAttribute('slope')) > 0;
       const dark = black && Number(black.getAttribute('slope')) < 0;
-      return !!white && !!black && bright && dark &&
-        composite(ink, 'whitem') !== undefined && composite(ink, 'blackm') !== undefined;
+      return !!white && !!black && bright && dark && whiteCut >= 0.65 && whiteCut <= 0.9 &&
+        composite(ink, 'blackm') !== undefined;
     })(),
-    'white = luminance >= 1/2, black = luminance < 1/2, both cut hard');
-  report.check('the parcel lines are lifted out of the black, and the drawing is merged under the ink',
+    'white kept only above 0.65 of the luminance; the dark side at a half');
+  report.check('no key of the ink turns on the colour of the map - only on the drawing',
     (() => {
       if (!ink) return false;
-      const blue = transfer(ink, 'blue');
-      const withoutBlue = composite(ink, 'bm');
-      const order = merged(ink);
-      // the white is laid down first and the black over it: a digit's own dark outline is
-      // the only thing that separates two digits drawn three pixels apart, so the white of
-      // one digit must never be able to cover it
-      return !!blue && !!withoutBlue &&
-        withoutBlue.getAttribute('operator') === 'out' &&
-        withoutBlue.getAttribute('in2') === 'blue' &&
-        order.length === 2 && order[0] === 'white' && order[1] === 'black';
+      // a red-minus-blue matrix fired on every dark blue roof and painted the number's
+      // surroundings white - the slab of the report, over a dark background
+      const colourKey = [...ink.querySelectorAll('feColorMatrix')]
+        .some(m => (m.getAttribute('values') || '').trim().split(/\s+/).slice(15, 18)
+          .map(Number).some(v => v !== 0) && m.getAttribute('result') === 'bl');
+      return !colourKey && !composite(ink, 'wm') && !composite(ink, 'bm');
     })(),
-    'a boundary line is white in the drawing, its own dark edge is dropped from the black, and the dark ink goes on top');
-  // Round 32: the service draws the boundary names in black on a fat white halo, and the
-  // halo is the separations the letters need - it is left alone, only the name is repainted.
-  report.check('the names are white letters with a one pixel ring, and the halo is left as drawn',
+    'the luminance key is the only key of the parcel filter');
+  // Round 33: five rounds of turning the boundary names white failed because a letter of
+  // that service is a stroke one pixel wide - white letters with the dark outline they
+  // need are black and white in equal measure and read as a hollow skeleton. So the
+  // service's own scheme is hardened instead: its soft halo becomes pure white and its
+  // soft letters pure black, and the drawing around them is left alone.
+  report.check('the boundary names are hardened into black letters on the white halo the service draws',
     (() => {
       if (!namesInk) return false;
-      const white = funcOf(namesInk, 'whitea');
-      const ring = composite(namesInk, 'ring0');
-      const kept = composite(namesInk, 'kept');
+      const halo = funcOf(namesInk, 'haloa');
+      const letter = funcOf(namesInk, 'lettera');
       const order = merged(namesInk);
-      // the cut sits below the halo (1.0) and above the name (all but black), and it is
-      // well below a brown boundary line, so nothing but the letters becomes white
-      // the stretch ends at the cut: alpha = 1 - luminance/cut, so at luminance = cut it is
-      // a half, where `discrete` switches
-      const cut = white ? 0.5 / -Number(white.getAttribute('slope')) : NaN;
-      return !!white && cut > 0.2 && cut < 0.45 &&
-        !!ring && ring.getAttribute('operator') === 'out' &&
-        ring.getAttribute('in') === 'near' && ring.getAttribute('in2') === 'whitem' &&
-        !!kept && kept.getAttribute('operator') === 'out' &&
-        order.length === 3 && order[0] === 'kept' && order[1] === 'black' && order[2] === 'white';
+      // the halo is cut high (the brightest thing in that drawing), the letters low
+      // enough to keep them and high enough to leave a brown boundary line alone
+      const haloCut = cutAt(namesInk, 'haloa');
+      const letterCut = cutAt(namesInk, 'lettera');
+      return !!halo && !!letter && haloCut >= 0.6 && haloCut <= 0.85 &&
+        letterCut >= 0.3 && letterCut <= 0.6 &&
+        order.length === 3 && order[0] === 'SourceGraphic' &&
+        order[1] === 'halo' && order[2] === 'letter';
     })(),
-    'letters cut from the dark ink, a one pixel ring grown from them, the drawing itself kept');
-  report.check('the ink layers paint no colour of their own but white and black',
-    !!ink && !!namesInk &&
-    [ink, namesInk].every(f => [...f.querySelectorAll('feFlood')]
-      .every(flood => ['#fff', '#000'].includes(flood.getAttribute('flood-color'))
-        || flood.getAttribute('result') === 'fw' || flood.getAttribute('result') === 'fk')),
-    'every flood is #fff or #000');
+    'the halo flooded white at a high cut, the letters flooded black, the drawing kept underneath');
   const group = ['Geoportal - podział adm', 'Geoportal - Miasta', 'Geoportal - gminy',
     'Geoportal - powiaty', 'Geoportal - województwa', 'Geoportal - Granica PL'];
   report.check('every drawing of the administrative group is white ink, drawn twice the size in one image per window',

@@ -23,7 +23,7 @@
  */
 
 /* Changelog:
- *  1.6.0 - OSM, the standard photo layer, the level crossings and the topographic objects come as tiles of the editor's own map, because those services refuse a whole-window picture; the parcels, the addresses and the boundaries are tiles of that map too, so a pan inside the margin of the tiles asks for nothing at all and a longer one only for the strip it uncovers; the crossings and the detailed BDOT switches ask in EPSG:2180, the system those services draw in - asked in 4326 they answer with a picture of their own error instead of the data (drawn into the image, because OpenLayers asks a WMS for INIMAGE exceptions); every service is now asked for its errors as documents instead of pictures, so a failure leaves a hole in the layer instead of a grey plate of text on the map; the six drawings of the administrative group are asked for in cells of 2048 px of map at half their pixels, so the service draws their letters twice as large and a window of the editor's size is one image of the service, laid out in one pass; two SVG filters paint the ink of those drawings: each turns the image into solid white or solid black at a hard threshold on its brightness, and neither grows anything around the letters, because growth was what merged a parcel number into one white slab; a parcel number is drawn by the service as white digits with a one pixel dark outline, so the digits are taken as they are - the white side stays white, the outline stays black and separates the digits - and the flat white plate a number may be drawn on remains visible under them; the names of the boundary layers are dark letters on a fat white halo, so the letters alone are repainted white, a one pixel dark ring grown from those letters and taken out of the mask again outlines them, and the halo, the coloured areas and the boundary lines stay exactly as the service drew them; earlier rounds bleached the whole drawing or grew a casing around its letters, which is why the numbers and the names of the report of 10.2026 came out as single white bars; the rest of those drawings is kept and blurred by half a pixel, which takes the two pixel steps out of the raster without a threshold cutting the thin lines away; the addresses, the streets, the places, the crossings and the topographic objects are shown exactly as the service draws them, without a filter and at one image pixel per pixel of the map, because those drawings cannot be recoloured without losing them - a street is a wide translucent surface, which any whitening paints over the photo as a white band; the road network and the BDOT surfaces, whose colour is the map itself, are lifted under a thin white edge; a view picture is never asked for past about a megapixel, a refused image is asked for again after a moment, the drawing of the view a layer has delivered stays on the map only for as long as that view is the one being asked for (OpenLayers used to keep it beside the new one, at the offset of the pan, which is what doubled the parcel numbers and the names), it is never carried through a zoom, and a setting that cannot be read no longer stops the script.
+ *  1.6.0 - OSM, the standard photo layer, the level crossings and the topographic objects come as tiles of the editor's own map, because those services refuse a whole-window picture; the parcels, the addresses and the boundaries are tiles of that map too, so a pan inside the margin of the tiles asks for nothing at all and a longer one only for the strip it uncovers; the crossings and the detailed BDOT switches ask in EPSG:2180, the system those services draw in - asked in 4326 they answer with a picture of their own error instead of the data (drawn into the image, because OpenLayers asks a WMS for INIMAGE exceptions); every service is now asked for its errors as documents instead of pictures, so a failure leaves a hole in the layer instead of a grey plate of text on the map; the six drawings of the administrative group are asked for in cells of 2048 px of map at half their pixels, so the service draws their letters twice as large and a window of the editor's size is one image of the service, laid out in one pass; two SVG filters paint the ink of those drawings, and the drawings are now asked for at a third of their pixels, so the service draws its letters three times as large - at a half the service's own soft edge was as wide on screen as the gap between two digits, and the gaps closed into the slabs of the report; a parcel number is drawn by the service as white digits, so the white is taken at a high cut - above that soft edge and above the pale halo around it, neither of which may become white - the dark side of the drawing comes back as black and separates the digits, and a dark casing is grown out of the digits, never into them, so that a white digit on a pale roof still reads; the names of the boundary layers are a dark name on a fat white halo, and a letter of that service is a stroke one pixel wide, so making it white with the dark outline a white letter needs turned every name into a hollow skeleton - instead the service's own scheme is hardened: its soft halo becomes pure white and its soft letters pure black, and the boundary lines, the coloured areas and the rest of the drawing stay exactly as the service drew them; the rest of those drawings is kept and blurred by half a pixel, which takes the two pixel steps out of the raster without a threshold cutting the thin lines away; the addresses, the streets, the places, the crossings and the topographic objects are shown exactly as the service draws them, without a filter and at one image pixel per pixel of the map, because those drawings cannot be recoloured without losing them - a street is a wide translucent surface, which any whitening paints over the photo as a white band; the road network and the BDOT surfaces, whose colour is the map itself, are lifted under a thin white edge; a view picture is never asked for past about a megapixel, a refused image is asked for again after a moment, the drawing of the view a layer has delivered stays on the map only for as long as that view is the one being asked for (OpenLayers used to keep it beside the new one, at the offset of the pan, which is what doubled the parcel numbers and the names), it is never carried through a zoom, and a setting that cannot be read no longer stops the script.
  *  1.5.5 - WME SDK v2.374: async SDK mode; version-tolerant startup, events, zoom filtering and controls; photo layers request JPEG without the needless transparency flag, as one image per view instead of a tile grid (the ortho WMS answers whole tile batches with 404); a refused image is requested three times - once immediately, then twice at a growing distance - and a view image that OpenLayers gave up on is requested again instead of leaving the map empty.
  *  1.5.4 - Use SDK readiness, state and events; guard WMS and preserve the Layers menu.
  *  1.5.2 - New layer names address, streets WMS endpoint
@@ -139,9 +139,12 @@
   // through, i.e. a smooth contour.
   //
   // How much smaller than the drawing the image asked for is, i.e. how many times the
-  // service's letters end up bigger than they were rasterised. Two - the letters of
-  // those drawings are five to eight pixels tall at their own size.
-  const LABEL_MAGNIFY = 2;
+  // service's letters end up bigger than they were rasterised. The service draws a name
+  // or a number in a stroke one pixel wide and wraps it in a halo of its own that is one
+  // or two pixels wide; at two the halo and the stroke are the same width on screen and
+  // the two of them close every gap between two letters. Three gives the gap a pixel of
+  // its own, and the hard cut keeps the edge of it sharp.
+  const LABEL_MAGNIFY = 3;
   // Both filters have one idea and they add no shape of their own: they only change the
   // colour of the pixels the service already drew. The rounds before grew the ink (a
   // dilate of the whole silhouette for the casing) and that is what fused the digits and
@@ -184,64 +187,63 @@
     `<feComposite in="${name}b" in2="cov" operator="in" result="${name}m"/>` +
     `<feFlood flood-color="${colour}" result="f${name}"/>` +
     `<feComposite in="f${name}" in2="${name}m" operator="in" result="${name}"/>`;
+  // A black ring `r` elements wide, grown out of `white`'s own mask and drawn under it.
+  // Being grown out and not into the mask, the ring can never widen a glyph or close the
+  // gap to the glyph beside it - it only adds dark around the drawing, where the map is.
+  const LABEL_RING = (r) =>
+    `<feMorphology in="whitem" operator="dilate" radius="${r}" result="fat"/>` +
+    '<feComposite in="fat" in2="whitem" operator="out" result="ring0"/>' +
+    '<feComposite in="ring0" in2="cov" operator="in" result="ringm"/>' +
+    '<feFlood flood-color="#000" result="fr"/>' +
+    '<feComposite in="fr" in2="ringm" operator="in" result="casing"/>';
   const CONTRAST_SVG =
     '<svg id="geoportal-label-filters" width="0" height="0" ' +
     'style="position:absolute;left:0;top:0;pointer-events:none">' +
     '<defs>' +
-    // The parcel numbers: the bright body of a digit white, the service's own one pixel
-    // dark outline black. That outline is the casing and the separator between two digits
-    // at the same time, at the width the service chose; a number on a white plate keeps
-    // its plate (bright -> white) and its dark digits stay dark, as drawn. The blue
-    // boundary lines are lifted to white and their own dark edge is taken out of the black.
+    // The parcel numbers. A number is white digits with the service's own thin dark
+    // outline, on a white halo that clears the line they sit on. Two things of that are
+    // white, and no threshold can tell them apart: the digits and their halo - which is
+    // why every earlier round that flooded the bright side returned one filled slab where
+    // the number was. So the white is cut high, above the halo and above the soft edge the
+    // service draws around a stroke one pixel wide, and only the solid body of a digit
+    // survives it; the dark side of the drawing - the service's outline and the gaps
+    // between two digits - comes back as black and separates them.
     '<filter id="geoportal-labels-ink" x="-10%" y="-10%" width="120%" height="120%" ' +
     'color-interpolation-filters="sRGB">' +
     LABEL_LUMA +
     LABEL_COVERAGE +
-    '<feColorMatrix in="SourceGraphic" type="matrix" result="bl" ' +
-    'values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  -1 0 1 0 0"/>' +
-    '<feComponentTransfer in="bl" result="blue">' +
-    '<feFuncA type="linear" slope="5" intercept="-2"/>' +
-    '</feComponentTransfer>' +
-    LABEL_FLOOD('white', '#fff', 'bright') +
-    LABEL_FLOOD('black', '#000', 'dark') +
-    '<feComposite in="whitem" in2="blue" operator="arithmetic" k2="1" k3="1" result="wm"/>' +
-    '<feComposite in="wm" in2="cov" operator="in" result="wmc"/>' +
-    '<feFlood flood-color="#fff" result="fw"/>' +
-    '<feComposite in="fw" in2="wmc" operator="in" result="white"/>' +
-    '<feComposite in="blackm" in2="blue" operator="out" result="bm"/>' +
-    '<feFlood flood-color="#000" result="fk"/>' +
-    '<feComposite in="fk" in2="bm" operator="in" result="black"/>' +
-    // the dark side goes on top: a digit's own outline is the separation between two
-    // digits, so it must never be covered by the white of its neighbour
-    '<feMerge><feMergeNode in="white"/><feMergeNode in="black"/></feMerge>' +
+    LABEL_FLOOD('white', '#fff', 'bright', 0.72) +
+    LABEL_FLOOD('black', '#000', 'dark', 0.5) +
+    // a casing one pixel wide, grown from the digits and drawn under them: a white digit
+    // over a pale roof, a white plate or a bright meadow is otherwise invisible, and the
+    // ring cannot touch the glyph because it is grown from the mask and never into it
+    LABEL_RING(1) +
+    '<feMerge><feMergeNode in="casing"/><feMergeNode in="black"/>' +
+    '<feMergeNode in="white"/></feMerge>' +
     '</filter>' +
-    // The names of the boundary layers. The service draws a dark name on a fat white halo,
-    // and every round that repainted the whole silhouette lost the letters, either into the
-    // halo or into one merged bar. So the letters are white - as the report asks - but the
-    // white is drawn only over the name itself, and a ring one pixel wide is grown from
-    // exactly that mask: the ring separates a letter from the white halo behind it and from
-    // the letter beside it, and it cannot widen a letter, because it is taken out of the
-    // mask before it is used. The halo, the coloured areas and the boundary lines stay as
-    // the service drew them.
+    // The boundary names. The service draws a dark name on a fat white halo - and five
+    // rounds of making those letters white failed for a reason that is in the drawing: a
+    // letter of the boundary service is a stroke one pixel wide, so a white letter with the
+    // dark outline a white letter needs is black and white in equal measure, and it reads
+    // as a hollow skeleton, not as a letter. What the service got wrong is not the colour
+    // of the name, it is that the halo is a grey and the letters are a blur: both are soft.
+    // So both are hardened and nothing else is touched - the halo is flooded to pure white
+    // and the letters to pure black, and the drawing under them keeps its lines and its
+    // coloured areas exactly as the service drew them. Every edge stays as crisp as the
+    // luminance allows, and the name reads at a glance because black on white is the
+    // highest contrast there is.
     '<filter id="geoportal-labels-names" x="-10%" y="-10%" width="120%" height="120%" ' +
     'color-interpolation-filters="sRGB">' +
     LABEL_LUMA +
     LABEL_COVERAGE +
-    // The cut sits well above the name and well below everything else the drawing carries:
-    // the service's name is all but black, its white halo is at 1.0, a brown boundary line
-    // at about 0.48 and a translucent area at about 0.6 of a pixel of coverage - so a cut
-    // at a third takes the letters and nothing else.
-    LABEL_FLOOD('white', '#fff', 'dark', 0.33) +
-    '<feMorphology in="whitem" operator="dilate" radius="1" result="near"/>' +
-    '<feComposite in="near" in2="whitem" operator="out" result="ring0"/>' +
-    '<feComposite in="ring0" in2="cov" operator="in" result="ringm"/>' +
-    '<feFlood flood-color="#000" result="fk"/>' +
-    '<feComposite in="fk" in2="ringm" operator="in" result="black"/>' +
-    // the name itself is taken out of the drawing (the ring and the white replace it), and
-    // everything else - the halo, the coloured areas, the one pixel lines - is kept
-    '<feComposite in="SourceGraphic" in2="whitem" operator="out" result="kept"/>' +
-    '<feMerge><feMergeNode in="kept"/><feMergeNode in="black"/>' +
-    '<feMergeNode in="white"/></feMerge>' +
+    // the halo is the brightest thing in that drawing; the translucent areas (43 % of a
+    // pixel) are gated out by the coverage above, so a cut at 0.72 takes the halo alone
+    LABEL_FLOOD('halo', '#fff', 'bright', 0.72) +
+    // a name is all but black (0.10); a brown boundary line is 0.48, so a cut at 0.45 keeps
+    // the letters and leaves the line to the drawing
+    LABEL_FLOOD('letter', '#000', 'dark', 0.45) +
+    '<feMerge><feMergeNode in="SourceGraphic"/><feMergeNode in="halo"/>' +
+    '<feMergeNode in="letter"/></feMerge>' +
     '</filter>' +
     '</defs></svg>';
   const LABEL_CELL = 2048;

@@ -69,9 +69,10 @@ const BDOT_LAYERS = {
  * own 256 px grid, at exactly the pixels the map draws it with - except the one
  * drawings of the `Podział Administracyjny` group (round 30: the parcels and the five
  * boundary layers): they ask for a cell of `cell: 2048` at 1/`magnify` of its pixels,
- * so the service draws its letters twice as big and the filter turns them into plain
- * white ink - `white` keys the dark digits of a parcel number, `names` keys the pale
- * names of the boundary service with a lower cut. `contrast` is the one treatment a
+ * so the service draws its letters three times as big (round 33; at two the service's
+ * own soft edge and the gaps between two digits were the same width on screen) and the
+ * filter turns them into plain white ink - `white` cuts the bright side of a parcel
+ * number above that soft edge, `names` keys the dark letters of the boundary service. `contrast` is the one treatment a
  * layer has: `dark`/`colour` for the roads and the BDOT surfaces, `false` for a layer
  * shown exactly as the service draws it. `kind: 'tiles'` is a WMTS/XYZ layer of the
  * editor's own grid, `kind: 'view'` a WMS layer fetching one image per view,
@@ -127,33 +128,33 @@ const LAYERS = {
   'Geoportal - podział adm': {
     kind: 'grid', service: SERVICES.parcels, category: 'Podział Administracyjny',
     layers: 'dzialki,numery_dzialek', format: 'image/png', minZ: 15, singleTile: false,
-    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, magnify: 2, cell: 2048, contrast: 'white'
+    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, magnify: 3, cell: 2048, contrast: 'white'
   },
   'Geoportal - Miasta': {
     kind: 'grid', service: SERVICES.border, category: 'Podział Administracyjny',
     layers: 'A06_Granice_obrebow_ewidencyjnych,A05_Granice_jednostek_ewidencyjnych,A04_Granice_miast',
     format: 'image/png', minZ: 12, singleTile: false, ratio: 1.5, crs: 'EPSG:4326',
-    hasOpacity: false, magnify: 2, cell: 2048, contrast: 'names'
+    hasOpacity: false, magnify: 3, cell: 2048, contrast: 'names'
   },
   'Geoportal - gminy': {
     kind: 'grid', service: SERVICES.border, category: 'Podział Administracyjny',
     layers: 'A03_Granice_gmin', format: 'image/png', minZ: 10, singleTile: false,
-    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, magnify: 2, cell: 2048, contrast: 'names'
+    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, magnify: 3, cell: 2048, contrast: 'names'
   },
   'Geoportal - powiaty': {
     kind: 'grid', service: SERVICES.border, category: 'Podział Administracyjny',
     layers: 'A02_Granice_powiatow', format: 'image/png', minZ: 10, singleTile: false,
-    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, magnify: 2, cell: 2048, contrast: 'names'
+    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, magnify: 3, cell: 2048, contrast: 'names'
   },
   'Geoportal - województwa': {
     kind: 'grid', service: SERVICES.border, category: 'Podział Administracyjny',
     layers: 'A01_Granice_wojewodztw', format: 'image/png', minZ: 8, singleTile: false,
-    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, magnify: 2, cell: 2048, contrast: 'names'
+    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, magnify: 3, cell: 2048, contrast: 'names'
   },
   'Geoportal - Granica PL': {
     kind: 'grid', service: SERVICES.border, category: 'Podział Administracyjny',
     layers: 'A00_Granice_panstwa', format: 'image/png', minZ: 0, singleTile: false,
-    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, magnify: 2, cell: 2048, contrast: 'names'
+    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, magnify: 3, cell: 2048, contrast: 'names'
   },
   'Geoportal - obiekty topograficzne': {
     kind: 'grid', service: SERVICES.topo, category: 'Topografia / Inne',
