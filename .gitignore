@@ -2,3 +2,6 @@ node_modules/
 
 # test fixtures downloaded/built on demand (see test/README.md)
 test/.cache/
+
+# pictures committed back by the probe-raster workflow; read once, not kept
+probe-out/

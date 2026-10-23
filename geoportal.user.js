@@ -1288,6 +1288,23 @@
       // dashed line), while a number only reads when the service draws it bigger. The
       // lines are asked for at the size of the map; the numbers as columns of their own
       // at a third of the pixels, i.e. three times the size.
+      //
+      // Why the numbers are not text (round 42, measured - do not start this again).
+      // The numbers are also served as vector data: the aggregated EGiB WFS
+      // (PZGIK/EGIB/WFS/UslugaZbiorcza) answers a GetFeature over the view's bounding
+      // box with the parcel polygons and `NUMER_DZIALKI` as a string, in EPSG:3857, in
+      // one request and without a key - 86 parcels for a 716 x 537 m window. Text
+      // labels drawn by the map would be sharp at any size and would end every round
+      // about the legibility of the raster. It cannot be used here: the service sends
+      // no `Access-Control-Allow-Origin`, so a page of the editor cannot read the
+      // answer - verified with an explicit `Origin` header and an OPTIONS preflight,
+      // both answered 200 with no CORS header at all (test/live/probe-raster.cjs keeps
+      // the check), while an <img> of the same host needs no permission, which is why
+      // every other layer here works. A userscript with `@grant none` has no
+      // privileged request to fall back on, and the one service that is readable
+      // cross-origin (the WMS of KrajowaIntegracjaEwidencjiGruntow) returns the number
+      // per point through GetFeatureInfo, without geometry, and its own terms exclude
+      // harvesting. So the raster stays, and what is left is how it is recoloured.
       this.createWMSLayer("Geoportal - podział adm", this.WMS_SERVICES.parcels, "dzialki", "image/png", { singleTile: false, minZ: 15, hasOpacity: false, tileSize: LABEL_CELL, contrast: "white", companion: { layers: "numery_dzialek", magnify: LABEL_NUMBER_MAGNIFY, tileSize: LABEL_NUMBER_CELL, contrast: "numerals" } });
 
       this.createWMSLayer("Geoportal - Miasta", this.WMS_SERVICES.border_city, "A06_Granice_obrebow_ewidencyjnych,A05_Granice_jednostek_ewidencyjnych,A04_Granice_miast", "image/png", { singleTile: false, minZ: 12, hasOpacity: false, magnify: LABEL_MAGNIFY, tileSize: LABEL_CELL, contrast: "names" });
