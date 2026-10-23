@@ -177,9 +177,9 @@ module.exports = async function layers(report) {
   // Round 36: the service draws a number twice over - the glyph at full opacity, and a
   // soft white halo around it at about 40 %. Flooding the bright side promotes the halo
   // to the same white as the glyph: that is the glow, and that is what merges the digits.
-  // The alpha channel is the only thing that separates them, so every mask of the
-  // numerals is bounded by `solid` - what the service drew at full opacity.
-  report.check('a number is inked only where the service drew it at full opacity',
+  // The alpha channel is the only thing that separates them, so the white of a number is
+  // bounded by `solid` - what the service drew at full opacity.
+  report.check('the white of a number is inked only where the service drew it at full opacity',
     (() => {
       if (!numerals) return false;
       const solid = transfer(numerals, 'solid');
@@ -189,15 +189,37 @@ module.exports = async function layers(report) {
         .filter(c => c.getAttribute('in2') === 'solid');
       const order = merged(numerals);
       return table === '0 0 0 1' &&
-        // the white body, the dark outline and the drawing that comes back are all gated
         gated.some(c => c.getAttribute('result') === 'whitem') &&
-        gated.some(c => c.getAttribute('result') === 'blackm') &&
-        gated.some(c => c.getAttribute('result') === 'ringm') &&
         gated.some(c => c.getAttribute('result') === 'crisps') &&
         // no dark mask is merged: the service's outline is the glyph's own shape
         order.includes('black') && order[order.length - 1] === 'white';
     })(),
-    'solid = alpha >= 3/4; the white, the outline, the ring and the drawing all bounded by it');
+    'solid = alpha >= 3/4; the white body and the drawing that comes back are bounded by it');
+  // Round 38: the outline and the ring are strokes one pixel wide, so the service draws
+  // them at a partial alpha - the same alpha as its halo. Gating them on full opacity
+  // deleted them, and with them the only thing that kept two digits apart. A dark cut
+  // cannot keep a white pixel, so they can be gated on the drawing's own coverage.
+  report.check('the dark outline and the ring survive a stroke thinner than full opacity',
+    (() => {
+      if (!numerals) return false;
+      const cov = transfer(numerals, 'cov');
+      const slope = cov?.querySelector('feFuncA');
+      const gateOf = name => [...numerals.querySelectorAll('feComposite')]
+        .filter(c => c.getAttribute('result') === name)
+        .map(c => c.getAttribute('in2'));
+      const order = merged(numerals);
+      return !!slope && gateOf('blkm').includes('cov') && gateOf('ringm').includes('cov') &&
+        !gateOf('blkm').includes('solid') && !gateOf('ringm').includes('solid') &&
+        // both still work on their own discrete cut of the luminance
+        transfer(numerals, 'blkb') !== null &&
+        // the outline is the service's dark pixels minus the white body, and it is merged
+        [...numerals.querySelectorAll('feComposite')]
+          .some(c => c.getAttribute('result') === 'outlinem' &&
+            c.getAttribute('in') === 'blkm' && c.getAttribute('in2') === 'whitem' &&
+            c.getAttribute('operator') === 'out') &&
+        order.includes('black');
+    })(),
+    'blackm and ringm bounded by cov, the outline = dark minus white, merged under the white');
   report.check('the numerals are given more contrast without losing their shape',
     (() => {
       if (!numerals) return false;
