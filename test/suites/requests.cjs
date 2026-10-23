@@ -162,8 +162,10 @@ module.exports = async function requests(report) {
     const magnify = LAYERS[name].magnify ?? 1;
     const cell = LAYERS[name].cell ?? 256;
     // the request is rounded to whole pixels, so a factor that does not divide the cell
-    // evenly is off by at most one
-    const side = Math.round(cell / magnify);
+    // evenly is off by at most one - and it is capped at the megapixel the composition
+    // refuses, which is what a cell of 2048 px at 1:1 lands on
+    const cap = Math.floor(Math.sqrt(env.internals.MAX_VIEW_PIXELS));
+    const side = Math.min(cap, Math.round(cell / magnify));
     const want = `${side}x${side}`;
     const requests = env.requestsOf(env.layer(name));
     const sizes = [...new Set(requests.map(url => `${params(url).WIDTH}x${params(url).HEIGHT}`))];
@@ -174,6 +176,22 @@ module.exports = async function requests(report) {
     report.check(`“${name}” is drawn in its own ${cell} px cell of the map`,
       !drawn || drawn.width === `${cell}px`,
       drawn ? `cell ${drawn.width} x ${drawn.height}` : 'no cell measured');
+    // Round 35: the parcel drawing is two layers. The lines are asked for at the size of
+    // the map - a boundary line is one pixel of the service's raster, and a third of a
+    // pixel comes out as a dashed line - and the numbers of that same drawing are a
+    // companion layer, asked for at 1/LABEL_MAGNIFY like the name layers.
+    if (LAYERS[name].companion) {
+      const companion = LAYERS[name].companion;
+      const numbers = env.registry[name].companion;
+      const numberRequests = env.requestsOf(numbers);
+      const numberSizes = [...new Set(numberRequests.map(url => `${params(url).WIDTH}x${params(url).HEIGHT}`))];
+      const numberSide = Math.min(cap, Math.round(cell / companion.magnify));
+      report.check(`the numbers of “${name}” are their own layer, asked for at 1/${companion.magnify} of the cell`,
+        numberRequests.length > 0 && numberSizes.length === 1 &&
+        numberSizes[0] === `${numberSide}x${numberSide}` &&
+        params(numberRequests[0]).LAYERS === companion.layers,
+        `${numberRequests.length} cells, sizes ${numberSizes.join(', ')}, LAYERS=${params(numberRequests[0]).LAYERS}`);
+    }
   }
 
   const oneImage = ['Geoportal - drogi',
@@ -205,7 +223,11 @@ module.exports = async function requests(report) {
     const drawn = parseFloat(tile?.imgDiv?.style?.width || '');
     const magnify = LAYERS[name].magnify ?? 1;
     if (!asked.WIDTH || !drawn) continue;
-    const slack = 1;   // the request is rounded to whole pixels
+    // a request is capped at the megapixel the composition refuses - the parcel lines at
+    // 1:1 in a cell of 2048 px land on that cap, and are stretched to fill the cell
+    const cap = Math.floor(Math.sqrt(env.internals.MAX_VIEW_PIXELS));
+    const capped = Number(asked.WIDTH) >= cap;
+    const slack = capped ? drawn : 1;   // otherwise the request is rounded to whole pixels
     if (Math.abs(Number(asked.WIDTH) * magnify - drawn) > slack ||
         Math.abs(Number(asked.HEIGHT) * magnify - parseFloat(tile.imgDiv.style.height)) > slack) {
       scaled.push(`${name.replace('Geoportal - ', '')}: asked ${asked.WIDTH}x${asked.HEIGHT}, drawn ` +

@@ -91,12 +91,14 @@ module.exports = async function layers(report) {
     .getElementById('geoportal-label-filters');
   const ink = svg && svg.querySelector('filter[id="geoportal-labels-ink"]');
   const namesInk = svg && svg.querySelector('filter[id="geoportal-labels-names"]');
-  report.check('the two filters that re-draw the ink are on the page once, and only the lettered layers point at them',
-    !!svg && !!ink && !!namesInk && svg.querySelectorAll('filter').length === 2 &&
+  report.check('the filters that re-draw the ink are on the page once, and only the lettered layers point at them',
+    !!svg && !!ink && !!namesInk && !!svg.querySelector('filter[id="geoportal-labels-numerals"]') &&
+    svg.querySelectorAll('filter').length === 3 &&
     filters.white === 'url(#geoportal-labels-ink)' &&
     filters.names === 'url(#geoportal-labels-names)' &&
+    filters.numerals === 'url(#geoportal-labels-numerals)' &&
     Object.entries(filters).every(([kind, value]) =>
-      kind === 'white' || kind === 'names' || !value.includes('url(#')),
+      ['white', 'names', 'numerals'].includes(kind) || !value.includes('url(#')),
     Object.entries(filters).map(([kind, value]) => `${kind}: ${value}`).join(' | '));
   const luminanceKey = element => {
     const matrix = element && element.querySelector('feColorMatrix');
@@ -107,6 +109,7 @@ module.exports = async function layers(report) {
     return { luminance: row, intercept: values[19] };
   };
   const merged = filter => [...filter.querySelectorAll('feMergeNode')].map(node => node.getAttribute('in'));
+  const number = v => typeof v === 'number' && !Number.isNaN(v);
   const transfer = (filter, result) => [...filter.querySelectorAll('feComponentTransfer')]
     .find(t => t.getAttribute('result') === result);
   const composite = (filter, result) => [...filter.querySelectorAll('feComposite')]
@@ -126,75 +129,72 @@ module.exports = async function layers(report) {
     if (t.getAttribute('type') === 'discrete') return 0.5;    // discrete switches at a half
     return -Number(t.getAttribute('intercept')) / Number(t.getAttribute('slope'));
   };
-  // Round 33: the parcels need a casing (a white digit on a pale roof is invisible), and
-  // it has to be born OUTSIDE the glyph - grown from the mask and taken out of it - so it
-  // can never close the gap to the digit beside it. The names grow nothing at all.
-  report.check('the parcel casing is one ring grown out of the digits, and the names grow nothing',
-    !!ink && !!namesInk &&
-    namesInk.querySelectorAll('feMorphology').length === 0 &&
-    ink.querySelectorAll('feMorphology').length === 1 &&
-    [...ink.querySelectorAll('feMorphology')].every(m =>
-      m.getAttribute('operator') === 'dilate' && m.getAttribute('result') === 'fat') &&
+  // Round 35: the parcel drawing is split in two, because its two halves want opposite
+  // sizes. The lines are one pixel of the service's raster and are drawn at the size of
+  // the map; the numbers are a layer of their own at a third of the pixels. One image
+  // asked for at a third turned the lines into a third of a pixel - dashed.
+  const numerals = svg && svg.querySelector('filter[id="geoportal-labels-numerals"]');
+  report.check('the parcel lines and the parcel numbers are two layers, asked for at two sizes',
     (() => {
-      const ring = composite(ink, 'ring0');
-      const order = merged(ink);
-      // the ring is `fat` minus `whitem`: it never covers a glyph, and it is merged UNDER
-      // the white, so it can only darken the map around the drawing. Round 34: the merge
-      // starts from `SourceGraphic`, so whatever the masks do not lift is still drawn -
-      // without it the thin boundary lines, which are neither bright enough for the white
-      // nor dark enough for anything else, were dropped and vanished off the map.
-      return !!ring && ring.getAttribute('operator') === 'out' &&
-        ring.getAttribute('in') === 'fat' && ring.getAttribute('in2') === 'whitem' &&
-        order[0] === 'SourceGraphic' &&
-        order.includes('casing') && order[order.length - 1] === 'white';
+      if (!ink || !numerals || !env.internals.layers) return false;
+      const entry = env.internals.layers['Geoportal - podział adm'];
+      const definition = entry?.definition;
+      const companion = definition?.options?.companion;
+      // the lines: the geometry alone, at the size of the map
+      // the numbers: their own service column, magnified
+      return definition?.layers === 'dzialki' && !definition.options.magnify &&
+        !!companion && companion.layers === 'numery_dzialek' &&
+        companion.magnify === env.internals.LABEL_MAGNIFY &&
+        companion.contrast === 'numerals';
     })(),
-    'one dilate of the ink mask, the ring taken out of it and merged under the white');
-  // The white is a flood over a hard cut of the drawing's own luminance, i.e. the letters
-  // are 255 white from edge to edge and the grey of the round-31 report is impossible.
-  report.check('a letter is a flood of pure white over a hard cut - never a grey ramp',
-    (() => {
-      if (!ink || !namesInk) return false;
-      const hard = (filter) => [...filter.querySelectorAll('feFuncA')]
-        .some(f => f.getAttribute('type') === 'discrete');
-      const flood = (filter, colour) => filter.querySelector(`feFlood[flood-color="${colour}"]`) !== null;
-      return hard(ink) && hard(namesInk) && flood(ink, '#fff') && flood(ink, '#000') &&
-        flood(namesInk, '#fff') && flood(namesInk, '#000');
-    })(),
-    'every mask is cut with a discrete transfer, and every flood is #fff or #000');
-  // Round 33: the service draws a digit in a stroke one pixel wide and wraps it in a soft
-  // edge of its own; at a cut of a half that edge is promoted to white and every gap
-  // between two digits closes into the slab of the report. The white is cut high - above
-  // the soft edge - and the dark side at a half brings the gaps back as black.
-  report.check('the digits are cut high enough to reject the service\'s soft edge',
+    'dzialki at 1:1 with the white-lines filter, numery_dzialek at 1/LABEL_MAGNIFY with the numerals filter');
+  report.check('the lines are taken by their colour and flooded pure white, on top of the drawing',
     (() => {
       if (!ink) return false;
-      const white = funcOf(ink, 'whitea');
-      const whiteCut = cutAt(ink, 'whitea');
-      const bright = white && Number(white.getAttribute('slope')) > 0;
-      // round 34 drops the dark side of the parcel filter: the drawing is merged whole
-      // underneath, so the service's own dark outline stays as it drew it, and a second
-      // black mask over the glyph only mangled it
-      return !!white && bright && whiteCut >= 0.65 && whiteCut <= 0.9 &&
-        funcOf(ink, 'blacka') === undefined;
-    })(),
-    'white kept only above 0.65 of the luminance; no dark mask over the drawing');
-  // Round 34: the drawing is merged first in both filters, so no mask can ever take a
-  // part of it off the map. This is what the parcel boundary lines of the report were.
-  report.check('the service\'s drawing is merged under the ink of both layers, whole',
-    !!ink && !!namesInk &&
-    merged(ink)[0] === 'SourceGraphic' && merged(namesInk)[0] === 'SourceGraphic',
-    `ink: ${merged(ink).join(' -> ')} | names: ${merged(namesInk).join(' -> ')}`);
-  report.check('no key of the ink turns on the colour of the map - only on the drawing',
-    (() => {
-      if (!ink) return false;
-      // a red-minus-blue matrix fired on every dark blue roof and painted the number's
-      // surroundings white - the slab of the report, over a dark background
       const colourKey = [...ink.querySelectorAll('feColorMatrix')]
         .some(m => (m.getAttribute('values') || '').trim().split(/\s+/).slice(15, 18)
-          .map(Number).some(v => v !== 0) && m.getAttribute('result') === 'bl');
-      return !colourKey && !composite(ink, 'wm') && !composite(ink, 'bm');
+          .map(Number).join(' ') === '-1 0 1');
+      const order = merged(ink);
+      return colourKey && ink.querySelector('feFlood[flood-color="#fff"]') !== null &&
+        order.length === 2 && order[0] === 'SourceGraphic' && order[1] === 'bluew';
     })(),
-    'the luminance key is the only key of the parcel filter');
+    'blue minus red, a hard cut, a flood of #fff merged over the untouched drawing');
+  // The numbers keep the drawing the service made: a digit only reads because of the
+  // shape and the gaps its own outline gives it, so that outline is never masked away.
+  report.check('a number is the service\'s own drawing, only whiter and with a casing outside it',
+    (() => {
+      if (!numerals) return false;
+      const order = merged(numerals);
+      const ring = composite(numerals, 'ring0');
+      // no dark mask: the outline of a digit is part of the glyph, not something to paint
+      return numerals.querySelector('feFuncA[type="discrete"]') !== null &&
+        funcOf(numerals, 'blacka') === undefined &&
+        !!ring && ring.getAttribute('operator') === 'out' &&
+        ring.getAttribute('in') === 'fat' && ring.getAttribute('in2') === 'whitem' &&
+        order[0] === 'casing' && order.includes('crisp') && order[order.length - 1] === 'white';
+    })(),
+    'white body flooded, casing grown outwards and merged under, the drawing kept with more contrast');
+  report.check('the numerals are given more contrast without losing their shape',
+    (() => {
+      if (!numerals) return false;
+      const crisp = transfer(numerals, 'crisp');
+      const slope = crisp && Number(crisp.querySelector('feFuncR').getAttribute('slope'));
+      // a stretch around the middle: neither 1 (nothing) nor a threshold
+      return !!crisp && slope > 1.2 && slope <= 3 &&
+        crisp.querySelector('feFuncR').getAttribute('type') === 'linear';
+    })(),
+    'a linear stretch of the drawing, not a cut');
+  report.check('no key of the ink turns on the colour of the map in the numerals layer',
+    !numerals || ![...numerals.querySelectorAll('feColorMatrix')]
+      .some(m => (m.getAttribute('values') || '').trim().split(/\s+/).slice(15, 18)
+        .map(Number).some(v => v !== 0) && m.getAttribute('result') === 'bl'),
+    'the numerals layer keys on luminance alone');
+  // Round 34/35: the drawing is merged first in both lettered filters that carry the
+  // service's whole drawing, so no mask can take a part of it off the map.
+  report.check('the service\'s drawing is merged under the ink of the filtered layers, whole',
+    !!ink && !!namesInk && merged(ink)[0] === 'SourceGraphic' &&
+    merged(namesInk)[0] === 'SourceGraphic',
+    `ink: ${merged(ink).join(' -> ')} | names: ${merged(namesInk).join(' -> ')}`);
   // Round 33: five rounds of turning the boundary names white failed because a letter of
   // that service is a stroke one pixel wide - white letters with the dark outline they
   // need are black and white in equal measure and read as a hollow skeleton. So the
@@ -203,28 +203,26 @@ module.exports = async function layers(report) {
   report.check('the boundary names are hardened into black letters on the white halo the service draws',
     (() => {
       if (!namesInk) return false;
-      const halo = funcOf(namesInk, 'haloa');
-      const letter = funcOf(namesInk, 'lettera');
-      const order = merged(namesInk);
-      // the halo is cut high (the brightest thing in that drawing), the letters low
-      // enough to keep them and high enough to leave a brown boundary line alone
       const haloCut = cutAt(namesInk, 'haloa');
       const letterCut = cutAt(namesInk, 'lettera');
-      return !!halo && !!letter && haloCut >= 0.6 && haloCut <= 0.85 &&
-        letterCut >= 0.3 && letterCut <= 0.6 &&
+      const order = merged(namesInk);
+      return number(haloCut, 'halo') && number(letterCut, 'letter') &&
+        haloCut >= 0.6 && haloCut <= 0.85 && letterCut >= 0.3 && letterCut <= 0.6 &&
         order.length === 3 && order[0] === 'SourceGraphic' &&
         order[1] === 'halo' && order[2] === 'letter';
     })(),
     'the halo flooded white at a high cut, the letters flooded black, the drawing kept underneath');
   const group = ['Geoportal - podział adm', 'Geoportal - Miasta', 'Geoportal - gminy',
     'Geoportal - powiaty', 'Geoportal - województwa', 'Geoportal - Granica PL'];
-  report.check('every drawing of the administrative group is white ink, drawn twice the size in one image per window',
-    group.every(name => LAYERS[name].contrast === 'white' || LAYERS[name].contrast === 'names') &&
-    group.every(name => registry[name].definition.options.magnify === env.internals.LABEL_MAGNIFY &&
-      registry[name].definition.options.tileSize === env.internals.LABEL_CELL) &&
+  report.check('every drawing of the administrative group is re-drawn, its letters at LABEL_MAGNIFY',
+    group.every(name => ['white', 'names'].includes(LAYERS[name].contrast)) &&
+    group.every(name => registry[name].definition.options.tileSize === env.internals.LABEL_CELL) &&
     env.internals.LABEL_CELL === 2048 &&
-    names.filter(name => registry[name].definition.options.magnify !== undefined).length === 6,
-    `${group.length} layers at magnify ${env.internals.LABEL_MAGNIFY}, cell ${env.internals.LABEL_CELL} px`);
+    // the five name layers in one image each, the parcel numbers through their companion;
+    // the parcel lines are the only one of the six that is not magnified, on purpose
+    group.filter(name => registry[name].definition.options.magnify === env.internals.LABEL_MAGNIFY).length === 5 &&
+    registry['Geoportal - podział adm'].definition.options.companion?.magnify === env.internals.LABEL_MAGNIFY,
+    `${group.length} layers, cell ${env.internals.LABEL_CELL} px, the parcel numbers at ${env.internals.LABEL_MAGNIFY}x`);
   const verbatim = ['Geoportal - adresy', 'Geoportal - ulice', 'Geoportal - place',
     'Geoportal - adresy, place i ulice w jednym', 'Geoportal - obiekty topograficzne',
     'Geoportal - przejazdy kolejowe (wymagany duży zoom)'];
@@ -287,7 +285,11 @@ module.exports = async function layers(report) {
   env.integration.fixZIndex();
   const stacked = LAYER_ORDER
     .filter(name => env.registry[name].instance && env.registry[name].isEnabled)
-    .map(name => ({ name, z: Number(env.registry[name].instance.getZIndex()) }));
+    // a companion is the other half of the same drawing and is stacked right above it
+    .flatMap(name => [{ name, z: Number(env.registry[name].instance.getZIndex()) },
+      ...(env.registry[name].companion
+        ? [{ name: `${name} (numery)`, z: Number(env.registry[name].companion.getZIndex()) }]
+        : [])]);
   report.check('the layers are stacked upwards from z-index 2040, in list order',
     stacked.length > 0 &&
     stacked.every((entry, index, all) => index === 0

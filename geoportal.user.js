@@ -23,7 +23,7 @@
  */
 
 /* Changelog:
- *  1.6.0 - OSM, the standard photo layer, the level crossings and the topographic objects come as tiles of the editor's own map, because those services refuse a whole-window picture; the parcels, the addresses and the boundaries are tiles of that map too, so a pan inside the margin of the tiles asks for nothing at all and a longer one only for the strip it uncovers; the crossings and the detailed BDOT switches ask in EPSG:2180, the system those services draw in - asked in 4326 they answer with a picture of their own error instead of the data (drawn into the image, because OpenLayers asks a WMS for INIMAGE exceptions); every service is now asked for its errors as documents instead of pictures, so a failure leaves a hole in the layer instead of a grey plate of text on the map; the six drawings of the administrative group are asked for in cells of 2048 px of map at half their pixels, so the service draws their letters twice as large and a window of the editor's size is one image of the service, laid out in one pass; two SVG filters paint the ink of those drawings, and each of them starts from the drawing itself - the service's image is merged first and whole, so a mask can only add to it and can never take a part of it off the map, which is what the thin parcel boundary lines were in the report of 10.2026 - and the six drawings are asked for at a third of their pixels, so the service draws its letters three times as large; a parcel number is drawn by the service as white digits with its own thin dark outline, so only the solid body of a digit is flooded pure white, at a cut high enough to leave the soft edge the service draws around it alone, and a dark casing grown outwards from that body and laid under it keeps a white digit visible on a pale roof; the names of the boundary layers are a dark name on a fat white halo, and a letter of that service is a stroke one pixel wide, so making it white with the dark outline a white letter needs turned every name into a hollow skeleton - instead the service's own scheme is hardened: its soft halo becomes pure white and its soft letters pure black, and the boundary lines, the coloured areas and the rest of the drawing stay exactly as the service drew them; the rest of those drawings is kept and blurred by half a pixel, which takes the two pixel steps out of the raster without a threshold cutting the thin lines away; the addresses, the streets, the places, the crossings and the topographic objects are shown exactly as the service draws them, without a filter and at one image pixel per pixel of the map, because those drawings cannot be recoloured without losing them - a street is a wide translucent surface, which any whitening paints over the photo as a white band; the road network and the BDOT surfaces, whose colour is the map itself, are lifted under a thin white edge; a view picture is never asked for past about a megapixel, a refused image is asked for again after a moment, the drawing of the view a layer has delivered stays on the map only for as long as that view is the one being asked for (OpenLayers used to keep it beside the new one, at the offset of the pan, which is what doubled the parcel numbers and the names), it is never carried through a zoom, and a setting that cannot be read no longer stops the script.
+ *  1.6.0 - OSM, the standard photo layer, the level crossings and the topographic objects come as tiles of the editor's own map, because those services refuse a whole-window picture; the parcels, the addresses and the boundaries are tiles of that map too, so a pan inside the margin of the tiles asks for nothing at all and a longer one only for the strip it uncovers; the crossings and the detailed BDOT switches ask in EPSG:2180, the system those services draw in - asked in 4326 they answer with a picture of their own error instead of the data (drawn into the image, because OpenLayers asks a WMS for INIMAGE exceptions); every service is now asked for its errors as documents instead of pictures, so a failure leaves a hole in the layer instead of a grey plate of text on the map; the six drawings of the administrative group are asked for in cells of 2048 px of map at half their pixels, so the service draws their letters twice as large and a window of the editor's size is one image of the service, laid out in one pass; the parcel drawing is asked for as two layers, because its two halves want opposite sizes: its boundary lines are one pixel of the service's raster and are drawn at the size of the map, with their own blue flooded pure white on top of the untouched drawing, so they stay continuous and white; its numbers are a layer of their own, asked for in a cell of the same size at a third of the pixels so that the service draws them three times as large, and that image is the service's own white digit with its own dark outline, flooded white inside, given a little more contrast and a dark casing grown outwards and laid under - the outline is the shape of the digit and its separation from the digit beside it, so nothing may paint over it; the names of the boundary layers are a dark name on a fat white halo, and a letter of that service is a stroke one pixel wide, so making it white with the dark outline a white letter needs turned every name into a hollow skeleton - instead the service's own scheme is hardened: its soft halo becomes pure white and its soft letters pure black, and the boundary lines, the coloured areas and the rest of the drawing stay exactly as the service drew them; the rest of those drawings is kept and blurred by half a pixel, which takes the two pixel steps out of the raster without a threshold cutting the thin lines away; the addresses, the streets, the places, the crossings and the topographic objects are shown exactly as the service draws them, without a filter and at one image pixel per pixel of the map, because those drawings cannot be recoloured without losing them - a street is a wide translucent surface, which any whitening paints over the photo as a white band; the road network and the BDOT surfaces, whose colour is the map itself, are lifted under a thin white edge; a view picture is never asked for past about a megapixel, a refused image is asked for again after a moment, the drawing of the view a layer has delivered stays on the map only for as long as that view is the one being asked for (OpenLayers used to keep it beside the new one, at the offset of the pan, which is what doubled the parcel numbers and the names), it is never carried through a zoom, and a setting that cannot be read no longer stops the script.
  *  1.5.5 - WME SDK v2.374: async SDK mode; version-tolerant startup, events, zoom filtering and controls; photo layers request JPEG without the needless transparency flag, as one image per view instead of a tile grid (the ortho WMS answers whole tile batches with 404); a refused image is requested three times - once immediately, then twice at a growing distance - and a view image that OpenLayers gave up on is requested again instead of leaving the map empty.
  *  1.5.4 - Use SDK readiness, state and events; guard WMS and preserve the Layers menu.
  *  1.5.2 - New layer names address, streets WMS endpoint
@@ -119,6 +119,8 @@
     // key with a cut down at the pale letter's own key - white names and boundary lines,
     // coloured areas untouched (their fill keys out below the cut)
     names: "url(#geoportal-labels-names)",
+    // the numbers of the parcels, a layer of their own (see the parcel definition)
+    numerals: "url(#geoportal-labels-numerals)",
     // the drawings whose colour is the map itself: lifted, never recoloured
     dark: "brightness(2) drop-shadow(0 0 1px #fff) drop-shadow(0 0 1px #fff)",
     colour: "brightness(2.2) saturate(1.7) " +
@@ -196,25 +198,62 @@
     '<feComposite in="ring0" in2="cov" operator="in" result="ringm"/>' +
     '<feFlood flood-color="#000" result="fr"/>' +
     '<feComposite in="fr" in2="ringm" operator="in" result="casing"/>';
+  // A stretch of the drawing's own colours around their middle, so that the service's
+  // one pixel outline comes out a little darker and its white a little brighter without
+  // touching the shape of a glyph. Everything stays a ramp - this is not a threshold.
+  const LABEL_CONTRAST = (k = 2) =>
+    `<feComponentTransfer in="SourceGraphic" result="crisp">` +
+    `<feFuncR type="linear" slope="${k}" intercept="${(-0.5 * (k - 1)).toFixed(3)}"/>` +
+    `<feFuncG type="linear" slope="${k}" intercept="${(-0.5 * (k - 1)).toFixed(3)}"/>` +
+    `<feFuncB type="linear" slope="${k}" intercept="${(-0.5 * (k - 1)).toFixed(3)}"/>` +
+    '</feComponentTransfer>';
   const CONTRAST_SVG =
     '<svg id="geoportal-label-filters" width="0" height="0" ' +
     'style="position:absolute;left:0;top:0;pointer-events:none">' +
     '<defs>' +
-    // The parcel numbers. The drawing itself is kept, whole, under everything below -
-    // this is the one rule the filter must never break again: a threshold can only lift
-    // part of a drawing to white, and every part it does not lift used to be dropped, which
-    // is what took the parcel boundary lines off the map. So the merge starts from
-    // `SourceGraphic`, and the two masks only add to it: the solid body of a digit is
-    // flooded pure white at a cut high enough to leave the service's own soft edge alone,
-    // and a dark casing one pixel wide is grown outwards from that body and laid under it,
-    // so a white digit on a pale roof still reads.
+    // The parcel lines. The geometry and the numbers are two layers of the same
+    // service, and they are asked for separately, because they want opposite things:
+    // a boundary line is one pixel of the service's raster and has to be drawn at
+    // exactly the size of the map, while a number is a letter and only reads when the
+    // service draws it bigger. One image cannot be both - asking the pair at a third of
+    // the pixels turned the lines into a third of a pixel and they came out dashed, which
+    // is the report of 10.2026. So this filter only lifts the geometry: the drawing is
+    // kept whole and the blue boundary lines are flooded pure white on top of it.
     '<filter id="geoportal-labels-ink" x="-10%" y="-10%" width="120%" height="120%" ' +
     'color-interpolation-filters="sRGB">' +
     LABEL_LUMA +
     LABEL_COVERAGE +
-    LABEL_FLOOD('white', '#fff', 'bright', 0.72) +
+    // the lines of that drawing are blue (blue minus red is about three quarters of the
+    // range) and nothing else on the map is; asked at the size of the map they are solid,
+    // so a hard key takes them with the antialiasing the service gave them
+    '<feColorMatrix in="SourceGraphic" type="matrix" result="bl" ' +
+    'values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  -1 0 1 0 0"/>' +
+    '<feComponentTransfer in="bl" result="bluea">' +
+    '<feFuncA type="linear" slope="6" intercept="-2.4"/>' +
+    '</feComponentTransfer>' +
+    '<feComponentTransfer in="bluea" result="blueb">' +
+    '<feFuncA type="discrete" tableValues="0 1"/>' +
+    '</feComponentTransfer>' +
+    '<feComposite in="blueb" in2="cov" operator="in" result="bluem"/>' +
+    '<feFlood flood-color="#fff" result="fb"/>' +
+    '<feComposite in="fb" in2="bluem" operator="in" result="bluew"/>' +
+    '<feMerge><feMergeNode in="SourceGraphic"/><feMergeNode in="bluew"/></feMerge>' +
+    '</filter>' +
+    // The parcel numbers, as a layer of their own: this drawing carries nothing but
+    // the numbers, so nothing else can be caught by mistake. A number is white digits
+    // with the service's own thin dark outline; that outline is kept exactly as drawn -
+    // it is the shape of the digit and its separation from the digit beside it - the
+    // white inside it is flooded pure white, a dark casing one pixel wide is grown
+    // outwards and laid under, and the whole drawing is given a little more contrast so
+    // the outline stays crisp at the size it is shown.
+    '<filter id="geoportal-labels-numerals" x="-10%" y="-10%" width="120%" height="120%" ' +
+    'color-interpolation-filters="sRGB">' +
+    LABEL_LUMA +
+    LABEL_COVERAGE +
+    LABEL_FLOOD('white', '#fff', 'bright', 0.62) +
     LABEL_RING(1) +
-    '<feMerge><feMergeNode in="SourceGraphic"/><feMergeNode in="casing"/>' +
+    LABEL_CONTRAST(2) +
+    '<feMerge><feMergeNode in="casing"/><feMergeNode in="crisp"/>' +
     '<feMergeNode in="white"/></feMerge>' +
     '</filter>' +
     // The boundary names. The service draws a dark name on a fat white halo - and five
@@ -1193,7 +1232,13 @@
       // keys the ink on darkness, so the digits come through and the plate does not -
       // the alpha-only whitening of the earlier rounds took both, which is the
       // unreadable white blob of the report of 10.2026 (see CONTRAST_FILTER).
-      this.createWMSLayer("Geoportal - podział adm", this.WMS_SERVICES.parcels, "dzialki,numery_dzialek", "image/png", { singleTile: false, minZ: 15, hasOpacity: false, magnify: LABEL_MAGNIFY, tileSize: LABEL_CELL, contrast: "white" });
+      // Two layers of the same service, asked for at two different sizes, because the
+      // two things it draws want opposite ones: the boundary lines are one pixel of the
+      // service's raster and must not be stretched (a third of a pixel comes out as a
+      // dashed line), while a number only reads when the service draws it bigger. The
+      // lines are asked for at the size of the map; the numbers as columns of their own
+      // at a third of the pixels, i.e. three times the size.
+      this.createWMSLayer("Geoportal - podział adm", this.WMS_SERVICES.parcels, "dzialki", "image/png", { singleTile: false, minZ: 15, hasOpacity: false, tileSize: LABEL_CELL, contrast: "white", companion: { layers: "numery_dzialek", magnify: LABEL_MAGNIFY, contrast: "numerals" } });
 
       this.createWMSLayer("Geoportal - Miasta", this.WMS_SERVICES.border_city, "A06_Granice_obrebow_ewidencyjnych,A05_Granice_jednostek_ewidencyjnych,A04_Granice_miast", "image/png", { singleTile: false, minZ: 12, hasOpacity: false, magnify: LABEL_MAGNIFY, tileSize: LABEL_CELL, contrast: "names" });
       this.createWMSLayer("Geoportal - gminy", this.WMS_SERVICES.border_city, "A03_Granice_gmin", "image/png", { singleTile: false, minZ: 10, hasOpacity: false, magnify: LABEL_MAGNIFY, tileSize: LABEL_CELL, contrast: "names" });
@@ -1238,6 +1283,11 @@
         // over in the settings from a version that had one cannot dim it.
         opacity: hasOpacity ? (this.settings.layerOpacity[name] ?? 1.0) : 1.0,
         isEnabled: this.settings.enabledLayers[name] ?? false,
+        // A layer whose drawing is really two things at two sizes (the parcel lines and
+        // the parcel numbers) carries a companion: a second layer of the same service,
+        // asked for at its own size and drawn directly above. It has no switch of its
+        // own - it appears and disappears with the layer it belongs to.
+        companion: null,
         updateVisibility: function () {
           const visible = this.isEnabled && integration.zoom !== null &&
             integration.zoom >= (options.minZ ?? 0);
@@ -1245,6 +1295,19 @@
             this.instance = integration.wms.createLayer(this.definition, this.opacity);
           }
           if (this.instance) this.instance.setVisibility(visible);
+          const companionOptions = options.companion;
+          if (companionOptions) {
+            if (visible && !this.companion) {
+              this.companion = integration.wms.createLayer({
+                name: `${name} (numery)`,
+                url: this.definition.url,
+                layers: companionOptions.layers,
+                format: this.definition.format,
+                options: { ...options, ...companionOptions, companion: null }
+              }, this.opacity);
+            }
+            if (this.companion) this.companion.setVisibility(visible);
+          }
         },
         setVisibility: function (visible) {
           this.isEnabled = visible;
@@ -1381,6 +1444,9 @@
       let currentZIndex = Z_INDEX_BASE;
       Object.values(this.layers).forEach(layer => {
         if (layer.instance && layer.isEnabled) layer.instance.setZIndex(currentZIndex++);
+        // the companion of a layer is the other half of the same drawing: it sits
+        // directly above it, never somewhere else in the stack
+        if (layer.companion && layer.isEnabled) layer.companion.setZIndex(currentZIndex++);
       });
     }
 
@@ -1406,7 +1472,10 @@
     internals: {
       VERSION: SCRIPT_VERSION, to2180, bounds2180, BDOT_LAYERS, PUWG, MAX_VIEW_PIXELS,
       IMAGE_RETRY_DELAYS, TILE_MAX_ZOOM, CONTRAST_FILTER, CONTRAST_SVG, LABEL_MAGNIFY,
-      LABEL_CELL, Z_INDEX_BASE
+      LABEL_CELL, Z_INDEX_BASE,
+      // the registry itself, so that a suite can look at the half of a layer that has no
+      // switch of its own (the numbers beside the parcel lines)
+      layers: geoportal.layers
     }
   });
 })();

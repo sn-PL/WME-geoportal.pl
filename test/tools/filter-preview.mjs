@@ -4,14 +4,13 @@
  * ortho photo, in one box of the same size each:
  *
  *   - as the service draws the cell at its own size (no filter) - the reference,
- *   - as round 33 showed it (the filters did not merge the drawing: the thin parcel
- *     boundary lines were neither bright enough for the white mask nor covered by
- *     anything else, so they were dropped and vanished off the map),
- *   - as the script shows it now (round 34: both filters merge `SourceGraphic` first and
- *     whole, so a mask can only add; the white of a number is the solid body of a digit
- *     at a cut above the service's soft edge, with a casing grown only outwards, and the
- *     boundary names are the service's own scheme hardened - soft halo to pure white,
- *     soft letters to pure black; every other drawing is shown as the service draws it).
+ *   - as round 34 showed it (one image for everything: the parcel lines stayed blue and
+ *     thin, and the digits were masked down to a black worm inside white),
+ *   - as the script shows it now (round 35: the parcel drawing is two layers - the lines
+ *     at the map's own size with their blue flooded pure white, the numbers at three
+ *     times the size as the service draws them, white body flooded, casing grown
+ *     outwards, the service's outline never masked; the boundary names are the service's
+ *     own scheme hardened - soft halo to pure white, soft letters to pure black).
  *
  * The drawings are loaded straight from the Geoportal, for the address the script's
  * own request has, and both treatments use the script's own filter strings, so what
@@ -104,9 +103,9 @@ for (const name of SHOW) {
   // rounds 24-29 for the boundary layers. For every drawing the script leaves alone it
   // shows the same treatment the script uses.
   const previous = kind === 'white'
-    ? { css: 'url(#geoportal-r33-ink)', caption: 'poprzednio (runda 33) &mdash; filtr nie przepuszcza&#322; rysunku: cienkie linie dzia&#322;ek znika&#322;y' }
+    ? { css: 'url(#geoportal-r34-ink)', caption: 'poprzednio (runda 34) &mdash; jeden obraz na wszystko: linie niebieskie i cienkie, cyfry zlane' }
     : kind === 'names'
-      ? { css: 'url(#geoportal-r33-names)', caption: 'poprzednio (runda 33) &mdash; bia&#322;e litery z czarn&#261; obw&oacute;dk&#261;: przy kresce 1 px pusty szkielet' }
+      ? { css: 'url(#geoportal-r34-names)', caption: 'poprzednio (runda 34) &mdash; nazwy bez zmian (utwardzone halo i litery)' }
       : kind
         ? { css: filters[kind], caption: 'bez zmian od rundy 20 &mdash; rozja&#347;nienie i bia&#322;a kraw&#281;d&#378;' }
         : { css: 'none', caption: 'od rundy 28: dok&#322;adnie rysunek us&#322;ugi, bez filtra' };
@@ -169,10 +168,10 @@ const html = `<!doctype html>
   .now :is(.over) { }
 </style>
 ${svg}
-<svg id="geoportal-r33-filter" width="0" height="0" style="position:absolute;left:0;top:0;pointer-events:none">
+<svg id="geoportal-r34-filter" width="0" height="0" style="position:absolute;left:0;top:0;pointer-events:none">
   <defs>
-    <filter id="geoportal-r33-ink" x="-10%" y="-10%" width="120%" height="120%" color-interpolation-filters="sRGB"><feColorMatrix in="SourceGraphic" type="matrix" result="lum" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0.299 0.587 0.114 0 0"/><feComponentTransfer in="SourceAlpha" result="cov"><feFuncA type="linear" slope="4" intercept="-2"/></feComponentTransfer><feComponentTransfer in="lum" result="whitea"><feFuncA type="linear" slope="1.7857" intercept="-0.7857"/></feComponentTransfer><feComponentTransfer in="whitea" result="whiteb"><feFuncA type="discrete" tableValues="0 1"/></feComponentTransfer><feComposite in="whiteb" in2="cov" operator="in" result="whitem"/><feFlood flood-color="#fff" result="fwhite"/><feComposite in="fwhite" in2="whitem" operator="in" result="white"/><feComponentTransfer in="lum" result="blacka"><feFuncA type="linear" slope="-1.0000" intercept="1"/></feComponentTransfer><feComponentTransfer in="blacka" result="blackb"><feFuncA type="discrete" tableValues="0 1"/></feComponentTransfer><feComposite in="blackb" in2="cov" operator="in" result="blackm"/><feFlood flood-color="#000" result="fblack"/><feComposite in="fblack" in2="blackm" operator="in" result="black"/><feMorphology in="whitem" operator="dilate" radius="1" result="fat"/><feComposite in="fat" in2="whitem" operator="out" result="ring0"/><feComposite in="ring0" in2="cov" operator="in" result="ringm"/><feFlood flood-color="#000" result="fr"/><feComposite in="fr" in2="ringm" operator="in" result="casing"/><feMerge><feMergeNode in="casing"/><feMergeNode in="black"/><feMergeNode in="white"/></feMerge></filter>
-    <filter id="geoportal-r33-names" x="-10%" y="-10%" width="120%" height="120%" color-interpolation-filters="sRGB"><feColorMatrix in="SourceGraphic" type="matrix" result="lum" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0.299 0.587 0.114 0 0"/><feComponentTransfer in="SourceAlpha" result="cov"><feFuncA type="linear" slope="4" intercept="-2"/></feComponentTransfer><feComponentTransfer in="lum" result="haloa"><feFuncA type="linear" slope="1.7857" intercept="-0.7857"/></feComponentTransfer><feComponentTransfer in="haloa" result="halob"><feFuncA type="discrete" tableValues="0 1"/></feComponentTransfer><feComposite in="halob" in2="cov" operator="in" result="halom"/><feFlood flood-color="#fff" result="fhalo"/><feComposite in="fhalo" in2="halom" operator="in" result="halo"/><feComponentTransfer in="lum" result="lettera"><feFuncA type="linear" slope="-1.1111" intercept="1"/></feComponentTransfer><feComponentTransfer in="lettera" result="letterb"><feFuncA type="discrete" tableValues="0 1"/></feComponentTransfer><feComposite in="letterb" in2="cov" operator="in" result="letterm"/><feFlood flood-color="#000" result="fletter"/><feComposite in="fletter" in2="letterm" operator="in" result="letter"/><feMerge><feMergeNode in="SourceGraphic"/><feMergeNode in="halo"/><feMergeNode in="letter"/></feMerge></filter>
+    <filter id="geoportal-r34-ink" x="-10%" y="-10%" width="120%" height="120%" color-interpolation-filters="sRGB"><feColorMatrix in="SourceGraphic" type="matrix" result="lum" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0.299 0.587 0.114 0 0"/><feComponentTransfer in="SourceAlpha" result="cov"><feFuncA type="linear" slope="4" intercept="-2"/></feComponentTransfer><feComponentTransfer in="lum" result="whitea"><feFuncA type="linear" slope="1.7857" intercept="-0.7857"/></feComponentTransfer><feComponentTransfer in="whitea" result="whiteb"><feFuncA type="discrete" tableValues="0 1"/></feComponentTransfer><feComposite in="whiteb" in2="cov" operator="in" result="whitem"/><feFlood flood-color="#fff" result="fwhite"/><feComposite in="fwhite" in2="whitem" operator="in" result="white"/><feMorphology in="whitem" operator="dilate" radius="1" result="fat"/><feComposite in="fat" in2="whitem" operator="out" result="ring0"/><feComposite in="ring0" in2="cov" operator="in" result="ringm"/><feFlood flood-color="#000" result="fr"/><feComposite in="fr" in2="ringm" operator="in" result="casing"/><feMerge><feMergeNode in="SourceGraphic"/><feMergeNode in="casing"/><feMergeNode in="white"/></feMerge></filter>
+    <filter id="geoportal-r34-names" x="-10%" y="-10%" width="120%" height="120%" color-interpolation-filters="sRGB"><feColorMatrix in="SourceGraphic" type="matrix" result="lum" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0.299 0.587 0.114 0 0"/><feComponentTransfer in="SourceAlpha" result="cov"><feFuncA type="linear" slope="4" intercept="-2"/></feComponentTransfer><feComponentTransfer in="lum" result="haloa"><feFuncA type="linear" slope="1.7857" intercept="-0.7857"/></feComponentTransfer><feComponentTransfer in="haloa" result="halob"><feFuncA type="discrete" tableValues="0 1"/></feComponentTransfer><feComposite in="halob" in2="cov" operator="in" result="halom"/><feFlood flood-color="#fff" result="fhalo"/><feComposite in="fhalo" in2="halom" operator="in" result="halo"/><feComponentTransfer in="lum" result="lettera"><feFuncA type="linear" slope="-1.1111" intercept="1"/></feComponentTransfer><feComponentTransfer in="lettera" result="letterb"><feFuncA type="discrete" tableValues="0 1"/></feComponentTransfer><feComposite in="letterb" in2="cov" operator="in" result="letterm"/><feFlood flood-color="#000" result="fletter"/><feComposite in="fletter" in2="letterm" operator="in" result="letter"/><feMerge><feMergeNode in="SourceGraphic"/><feMergeNode in="halo"/><feMergeNode in="letter"/></feMerge></filter>
   </defs>
 </svg>
 </head>

@@ -127,8 +127,12 @@ const LAYERS = {
   },
   'Geoportal - podział adm': {
     kind: 'grid', service: SERVICES.parcels, category: 'Podział Administracyjny',
-    layers: 'dzialki,numery_dzialek', format: 'image/png', minZ: 15, singleTile: false,
-    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, magnify: 3, cell: 2048, contrast: 'white'
+    layers: 'dzialki', format: 'image/png', minZ: 15, singleTile: false,
+    ratio: 1.5, crs: 'EPSG:4326', hasOpacity: false, cell: 2048, contrast: 'white',
+    // round 35: the lines and the numbers are asked for separately, because a boundary
+    // line is one pixel of the service's raster and must be drawn at the size of the
+    // map, while a number only reads when the service draws it bigger
+    companion: { layers: 'numery_dzialek', magnify: 3, contrast: 'numerals' }
   },
   'Geoportal - Miasta': {
     kind: 'grid', service: SERVICES.border, category: 'Podział Administracyjny',
