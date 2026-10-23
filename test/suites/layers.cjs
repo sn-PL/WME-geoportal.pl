@@ -144,10 +144,25 @@ module.exports = async function layers(report) {
       // the numbers: their own service column, magnified
       return definition?.layers === 'dzialki' && !definition.options.magnify &&
         !!companion && companion.layers === 'numery_dzialek' &&
-        companion.magnify === env.internals.LABEL_MAGNIFY &&
+        companion.magnify === env.internals.LABEL_NUMBER_MAGNIFY &&
         companion.contrast === 'numerals';
     })(),
-    'dzialki at 1:1 with the white-lines filter, numery_dzialek at 1/LABEL_MAGNIFY with the numerals filter');
+    `dzialki at 1:1 with the white-lines filter, numery_dzialek at 1/${env.internals.LABEL_NUMBER_MAGNIFY} with the numerals filter`);
+  // Round 37: the numbers are stretched a little less than the names. A number is a row of
+  // digits; past three the digits stop reading as digits and the row reads as one bar.
+  report.check('the parcel numbers are stretched less than the boundary names, and still magnified',
+    env.internals.LABEL_NUMBER_MAGNIFY > 1 &&
+    env.internals.LABEL_NUMBER_MAGNIFY < env.internals.LABEL_MAGNIFY,
+    `numbers ${env.internals.LABEL_NUMBER_MAGNIFY}x, names ${env.internals.LABEL_MAGNIFY}x`);
+  // The white of a digit is cut above the soft shoulder the service paints around a stroke:
+  // at a half that shoulder turned white and closed the gap between two digits.
+  report.check('the body of a digit is cut above the service\'s soft shoulder',
+    (() => {
+      if (!numerals) return false;
+      const cut = cutAt(numerals, 'whitea');
+      return cut >= 0.6 && cut <= 0.72;
+    })(),
+    'white kept only above 0.6 of the luminance, inside the full-opacity gate');
   report.check('the lines are taken by their colour and flooded pure white, on top of the drawing',
     (() => {
       if (!ink) return false;
@@ -229,8 +244,9 @@ module.exports = async function layers(report) {
     // the five name layers in one image each, the parcel numbers through their companion;
     // the parcel lines are the only one of the six that is not magnified, on purpose
     group.filter(name => registry[name].definition.options.magnify === env.internals.LABEL_MAGNIFY).length === 5 &&
-    registry['Geoportal - podział adm'].definition.options.companion?.magnify === env.internals.LABEL_MAGNIFY,
-    `${group.length} layers, cell ${env.internals.LABEL_CELL} px, the parcel numbers at ${env.internals.LABEL_MAGNIFY}x`);
+    registry['Geoportal - podział adm'].definition.options.companion?.magnify === env.internals.LABEL_NUMBER_MAGNIFY,
+    `${group.length} layers, cell ${env.internals.LABEL_CELL} px, the names at ${env.internals.LABEL_MAGNIFY}x, ` +
+    `the parcel numbers at ${env.internals.LABEL_NUMBER_MAGNIFY}x`);
   const verbatim = ['Geoportal - adresy', 'Geoportal - ulice', 'Geoportal - place',
     'Geoportal - adresy, place i ulice w jednym', 'Geoportal - obiekty topograficzne',
     'Geoportal - przejazdy kolejowe (wymagany duży zoom)'];
