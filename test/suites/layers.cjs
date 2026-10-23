@@ -139,10 +139,14 @@ module.exports = async function layers(report) {
       const ring = composite(ink, 'ring0');
       const order = merged(ink);
       // the ring is `fat` minus `whitem`: it never covers a glyph, and it is merged UNDER
-      // the white, so it can only darken the map around the drawing
+      // the white, so it can only darken the map around the drawing. Round 34: the merge
+      // starts from `SourceGraphic`, so whatever the masks do not lift is still drawn -
+      // without it the thin boundary lines, which are neither bright enough for the white
+      // nor dark enough for anything else, were dropped and vanished off the map.
       return !!ring && ring.getAttribute('operator') === 'out' &&
         ring.getAttribute('in') === 'fat' && ring.getAttribute('in2') === 'whitem' &&
-        order[0] === 'casing' && order[order.length - 1] === 'white';
+        order[0] === 'SourceGraphic' &&
+        order.includes('casing') && order[order.length - 1] === 'white';
     })(),
     'one dilate of the ink mask, the ring taken out of it and merged under the white');
   // The white is a flood over a hard cut of the drawing's own luminance, i.e. the letters
@@ -165,14 +169,21 @@ module.exports = async function layers(report) {
     (() => {
       if (!ink) return false;
       const white = funcOf(ink, 'whitea');
-      const black = funcOf(ink, 'blacka');
       const whiteCut = cutAt(ink, 'whitea');
       const bright = white && Number(white.getAttribute('slope')) > 0;
-      const dark = black && Number(black.getAttribute('slope')) < 0;
-      return !!white && !!black && bright && dark && whiteCut >= 0.65 && whiteCut <= 0.9 &&
-        composite(ink, 'blackm') !== undefined;
+      // round 34 drops the dark side of the parcel filter: the drawing is merged whole
+      // underneath, so the service's own dark outline stays as it drew it, and a second
+      // black mask over the glyph only mangled it
+      return !!white && bright && whiteCut >= 0.65 && whiteCut <= 0.9 &&
+        funcOf(ink, 'blacka') === undefined;
     })(),
-    'white kept only above 0.65 of the luminance; the dark side at a half');
+    'white kept only above 0.65 of the luminance; no dark mask over the drawing');
+  // Round 34: the drawing is merged first in both filters, so no mask can ever take a
+  // part of it off the map. This is what the parcel boundary lines of the report were.
+  report.check('the service\'s drawing is merged under the ink of both layers, whole',
+    !!ink && !!namesInk &&
+    merged(ink)[0] === 'SourceGraphic' && merged(namesInk)[0] === 'SourceGraphic',
+    `ink: ${merged(ink).join(' -> ')} | names: ${merged(namesInk).join(' -> ')}`);
   report.check('no key of the ink turns on the colour of the map - only on the drawing',
     (() => {
       if (!ink) return false;
