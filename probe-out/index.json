@@ -1,0 +1,114 @@
+[
+  {
+    "name": "same-ground-384",
+    "url": "https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaEwidencjiGruntow?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=numery_dzialek&STYLES=&FORMAT=image/png&TRANSPARENT=TRUE&SRS=EPSG:3857&BBOX=2337559.3066587453,6842578.51292628,2337859.3066587453,6842878.51292628&WIDTH=384&HEIGHT=384",
+    "status": 200,
+    "contentType": "image/png",
+    "bytes": 5783,
+    "image": {
+      "w": 384,
+      "h": 384
+    },
+    "file": "same-ground-384.png",
+    "error": null,
+    "refused": false
+  },
+  {
+    "name": "same-ground-768",
+    "url": "https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaEwidencjiGruntow?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=numery_dzialek&STYLES=&FORMAT=image/png&TRANSPARENT=TRUE&SRS=EPSG:3857&BBOX=2337559.3066587453,6842578.51292628,2337859.3066587453,6842878.51292628&WIDTH=768&HEIGHT=768",
+    "status": 200,
+    "contentType": "image/png",
+    "bytes": 7447,
+    "image": {
+      "w": 768,
+      "h": 768
+    },
+    "file": "same-ground-768.png",
+    "error": null,
+    "refused": false
+  },
+  {
+    "name": "same-ground-1440",
+    "url": "https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaEwidencjiGruntow?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=numery_dzialek&STYLES=&FORMAT=image/png&TRANSPARENT=TRUE&SRS=EPSG:3857&BBOX=2337559.3066587453,6842578.51292628,2337859.3066587453,6842878.51292628&WIDTH=1440&HEIGHT=1440",
+    "status": 200,
+    "contentType": "image/png",
+    "bytes": 9381,
+    "image": {
+      "w": 1440,
+      "h": 1440
+    },
+    "file": "same-ground-1440.png",
+    "error": null,
+    "refused": false
+  },
+  {
+    "name": "same-ground-768-again",
+    "url": "https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaEwidencjiGruntow?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=numery_dzialek&STYLES=&FORMAT=image/png&TRANSPARENT=TRUE&SRS=EPSG:3857&BBOX=2337559.3066587453,6842578.51292628,2337859.3066587453,6842878.51292628&WIDTH=768&HEIGHT=768",
+    "status": 200,
+    "contentType": "image/png",
+    "bytes": 7447,
+    "image": {
+      "w": 768,
+      "h": 768
+    },
+    "file": "same-ground-768-again.png",
+    "error": null,
+    "refused": false
+  },
+  {
+    "name": "twice-the-ground-768",
+    "url": "https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaEwidencjiGruntow?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=numery_dzialek&STYLES=&FORMAT=image/png&TRANSPARENT=TRUE&SRS=EPSG:3857&BBOX=2337409.3066587453,6842428.51292628,2338009.3066587453,6843028.51292628&WIDTH=768&HEIGHT=768",
+    "status": 200,
+    "contentType": "image/png",
+    "bytes": 15878,
+    "image": {
+      "w": 768,
+      "h": 768
+    },
+    "file": "twice-the-ground-768.png",
+    "error": null,
+    "refused": false
+  },
+  {
+    "name": "half-the-ground-768",
+    "url": "https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaEwidencjiGruntow?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=numery_dzialek&STYLES=&FORMAT=image/png&TRANSPARENT=TRUE&SRS=EPSG:3857&BBOX=2337634.3066587453,6842653.51292628,2337784.3066587453,6842803.51292628&WIDTH=768&HEIGHT=768",
+    "status": 200,
+    "contentType": "image/png",
+    "bytes": 4289,
+    "image": {
+      "w": 768,
+      "h": 768
+    },
+    "file": "half-the-ground-768.png",
+    "error": null,
+    "refused": false
+  },
+  {
+    "name": "both-layers-768",
+    "url": "https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaEwidencjiGruntow?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=dzialki,numery_dzialek&STYLES=&FORMAT=image/png&TRANSPARENT=TRUE&SRS=EPSG:3857&BBOX=2337559.3066587453,6842578.51292628,2337859.3066587453,6842878.51292628&WIDTH=768&HEIGHT=768",
+    "status": 200,
+    "contentType": "image/png",
+    "bytes": 35333,
+    "image": {
+      "w": 768,
+      "h": 768
+    },
+    "file": "both-layers-768.png",
+    "error": null,
+    "refused": false
+  },
+  {
+    "name": "both-layers-1440",
+    "url": "https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaEwidencjiGruntow?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=dzialki,numery_dzialek&STYLES=&FORMAT=image/png&TRANSPARENT=TRUE&SRS=EPSG:3857&BBOX=2337559.3066587453,6842578.51292628,2337859.3066587453,6842878.51292628&WIDTH=1440&HEIGHT=1440",
+    "status": 200,
+    "contentType": "image/png",
+    "bytes": 67128,
+    "image": {
+      "w": 1440,
+      "h": 1440
+    },
+    "file": "both-layers-1440.png",
+    "error": null,
+    "refused": false
+  }
+]
