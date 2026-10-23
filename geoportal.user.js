@@ -147,30 +147,20 @@
   // the two of them close every gap between two letters. Three gives the gap a pixel of
   // its own, and the hard cut keeps the edge of it sharp.
   const LABEL_MAGNIFY = 3;
-  // The parcel numbers are asked for at ONE image pixel per pixel of the map - no stretch
-  // at all, and this is the whole of rounds 37-39 undone.
-  //
-  // The service draws a number at a size of its own, about eight to ten pixels tall in the
-  // raster it returns, whatever size that raster is. Stretching the raster therefore does
-  // not give a bigger glyph - it gives the same glyph smeared over more pixels. Measured
-  // on a nine pixel number stretched two and a half times the way the browser stretches it
-  // (bilinear): of the whole label, fourteen pixels keep an alpha of 1, and in the gap
-  // between two digits the alpha never falls below a half. A gap that never gets dark is a
-  // gap no filter can open: the digits fuse, the counters of 0/4/6/8/9 flood white, and
-  // the edge turns into the staircase the reports call "poszarpane". Every gate of rounds
-  // 36-39 was fighting that interpolation, and none of them could win it.
-  //
-  // At 1:1 the same drawing arrives intact: the gaps are real dark columns, the counters
-  // are real holes, and the white body is a flat 255. So the numbers are drawn at the size
-  // the service drew them, and the filter only recolours what is there. What that costs is
-  // size - a digit is about ten pixels tall, the size of an ordinary map label - and that
-  // is the trade the reports kept asking for: clean digits rather than big smeared ones.
-  const LABEL_NUMBER_MAGNIFY = 1;
-  // The cell the numbers are drawn in. It has to be small enough that the request stays
-  // inside the megapixel cap of a view picture (MAX_VIEW_PIXELS): 1024 x 1024 is under it,
-  // 2048 x 2048 is four times over it and would be silently shrunk to 1095 and stretched
-  // 1.87 times - which is exactly what "LABEL_NUMBER_MAGNIFY = 1" did before this round,
-  // and why turning the magnification down changed nothing on the map.
+  // The parcel numbers. The service draws a number at a size of its own - about eight to
+  // ten pixels tall - whatever size of image it is asked for, so the only way to have a
+  // digit bigger on screen is to stretch the image, and stretching is what makes it soft.
+  // Two is the compromise: a digit is twice the size it is drawn at, the stretch is exact
+  // (no rounding, no cap), and the filter leaves the antialiasing of that stretch alone
+  // instead of cutting it into a staircase. Rounds 37-40 asked for 2.5 and then for 1 and
+  // both were reported as unreadable, for opposite reasons: at 2.5 the glyph smeared, at 1
+  // it was nine pixels tall - and in both cases the gates then deleted more than half of
+  // the ink that was left.
+  const LABEL_NUMBER_MAGNIFY = 2;
+  // The cell the numbers are drawn in. 1024 px of map, asked for as 512 px of image, is
+  // under the megapixel cap of a view picture (MAX_VIEW_PIXELS) with room to spare, so the
+  // request is never silently shrunk and stretched again - which is what made an earlier
+  // round's "magnify 1" behave like "magnify 1.87".
   const LABEL_NUMBER_CELL = 1024;
   // Both filters have one idea and they add no shape of their own: they only change the
   // colour of the pixels the service already drew. The rounds before grew the ink (a
@@ -209,48 +199,37 @@
   // `gate` is the alpha the ink is allowed to occupy: the drawing's own coverage by
   // default, or - for a number - only what the service drew at full opacity, because the
   // soft white halo around a label is the same brightness as the label itself.
-  const LABEL_FLOOD = (name, colour, kind, cut = 0.5, gate = 'cov') =>
+  const LABEL_FLOOD = (name, colour, kind, cut = 0.5, gate = 'cov', soft = false, gain = 0) =>
     // `kind` says which side of the cut is ink and `cut` where the cut sits, as a fraction
     // of the luminance. The stretch puts `cut` at a half of the alpha, where `discrete`
     // switches, so the mask is binary but the cut itself is free to move: a grey name on a
     // white halo needs a cut near the halo, not in the middle of the grey.
+    //
+    // `soft` leaves that stretch a ramp instead of stepping it to nought or one, and `gain`
+    // steepens the ramp itself: at a gain of five the line is saturated a fifth of the
+    // range away from `cut`, and everything between stays a ramp. That is what a nine
+    // pixel glyph needs (round 41): a `discrete` step at the same place throws away the
+    // half-tones the glyph is made of, and the digits come out dotted and ragged. A steep
+    // ramp keeps them and is still crisp, because a flat area saturates either way.
     (kind === 'dark'
       ? '<feComponentTransfer in="lum" result="' + name + 'a">' +
-        `<feFuncA type="linear" slope="${(-0.5 / cut).toFixed(4)}" intercept="1"/>` +
+        `<feFuncA type="linear" slope="${(-(gain || 0.5 / cut)).toFixed(4)}" ` +
+        `intercept="${(gain ? 0.5 + gain * cut : 1).toFixed(4)}"/>` +
         '</feComponentTransfer>'
       : '<feComponentTransfer in="lum" result="' + name + 'a">' +
-        `<feFuncA type="linear" slope="${(0.5 / (1 - cut)).toFixed(4)}" ` +
-        `intercept="${(0.5 - 0.5 * cut / (1 - cut)).toFixed(4)}"/></feComponentTransfer>`) +
-    `<feComponentTransfer in="${name}a" result="${name}b">` +
-    '<feFuncA type="discrete" tableValues="0 1"/>' +
-    '</feComponentTransfer>' +
+        `<feFuncA type="linear" slope="${(gain || 0.5 / (1 - cut)).toFixed(4)}" ` +
+        `intercept="${(gain ? 0.5 - gain * cut : 0.5 - 0.5 * cut / (1 - cut)).toFixed(4)}"/>` +
+        '</feComponentTransfer>') +
+    (soft
+      ? `<feComponentTransfer in="${name}a" result="${name}b">` +
+        '<feFuncA type="linear" slope="1" intercept="0"/>' +
+        '</feComponentTransfer>'
+      : `<feComponentTransfer in="${name}a" result="${name}b">` +
+        '<feFuncA type="discrete" tableValues="0 1"/>' +
+        '</feComponentTransfer>') +
     `<feComposite in="${name}b" in2="${gate}" operator="in" result="${name}m"/>` +
     `<feFlood flood-color="${colour}" result="f${name}"/>` +
     `<feComposite in="f${name}" in2="${name}m" operator="in" result="${name}"/>`;
-  // A black ring `r` elements wide, grown out of `white`'s own mask and drawn under it.
-  // Being grown out and not into the mask, the ring can never widen a glyph or close the
-  // gap to the glyph beside it - it only adds dark around the drawing, where the map is.
-  // What the service drew at full opacity: its glyph. The soft white halo the number
-  // services draw around a label is at about 40 % - keyed on brightness it is white, and
-  // then it is what merges two digits and what glows.
-  const LABEL_SOLID =
-    '<feComponentTransfer in="SourceAlpha" result="solid">' +
-    '<feFuncA type="discrete" tableValues="0 0 0 1"/></feComponentTransfer>';
-  const LABEL_RING = (r, gate = null) =>
-    `<feMorphology in="whitem" operator="dilate" radius="${r}" result="fat"/>` +
-    '<feComposite in="fat" in2="whitem" operator="out" result="ring0"/>' +
-    (gate ? `<feComposite in="ring0" in2="${gate}" operator="in" result="ringm"/>` : '') +
-    '<feFlood flood-color="#000" result="fr"/>' +
-    `<feComposite in="fr" in2="${gate ? 'ringm' : 'ring0'}" operator="in" result="casing"/>`;
-  // A stretch of the drawing's own colours around their middle, so that the service's
-  // one pixel outline comes out a little darker and its white a little brighter without
-  // touching the shape of a glyph. Everything stays a ramp - this is not a threshold.
-  const LABEL_CONTRAST = (k = 2) =>
-    `<feComponentTransfer in="SourceGraphic" result="crisp">` +
-    `<feFuncR type="linear" slope="${k}" intercept="${(-0.5 * (k - 1)).toFixed(3)}"/>` +
-    `<feFuncG type="linear" slope="${k}" intercept="${(-0.5 * (k - 1)).toFixed(3)}"/>` +
-    `<feFuncB type="linear" slope="${k}" intercept="${(-0.5 * (k - 1)).toFixed(3)}"/>` +
-    '</feComponentTransfer>';
   const CONTRAST_SVG =
     '<svg id="geoportal-label-filters" width="0" height="0" ' +
     'style="position:absolute;left:0;top:0;pointer-events:none">' +
@@ -298,33 +277,34 @@
     LABEL_LUMA +
     LABEL_COVERAGE +
     LABEL_INK +
-    LABEL_SOLID +
-    // The body of a digit: solid and bright. The cut sits above the soft shoulder the
-    // service paints around a stroke - at a half that shoulder became white and closed the
-    // gap between two digits; at two thirds the gap survives at its full width and the
-    // body of the glyph is still solid from edge to edge.
-    LABEL_FLOOD('white', '#fff', 'bright', 0.66, 'solid') +
-    // The service's own outline, dark. It is a stroke one pixel wide, so its own alpha is
-    // mostly below the full-opacity gate - gating it the same way as the white body deleted
-    // it outright, and with it the only thing that separated two digits. It does not need
-    // that gate: the halo it has to be kept away from is white, and a dark cut cannot keep
-    // a white pixel whatever its alpha. So it is gated on the drawing's own coverage.
-    LABEL_FLOOD('blk', '#000', 'dark', 0.45, 'ink') +
+    // Round 41: the gate of rounds 36-40 is gone, and that is the whole of the change.
+    //
+    // Measured on a digit as the service draws it, nine pixels tall: only 46 % of its ink
+    // reaches an alpha of 0.75, and only 20 % reaches 255. A mask gated on "solid" - what
+    // the service drew at full opacity - therefore deletes more than half of every glyph,
+    // and the half it keeps is a scattering of single pixels, which is exactly what the
+    // reports describe: digits "ragged", "uneven", "some completely unreadable". At this
+    // size there is no opaque core to key on. What separates a glyph from its halo is not
+    // how opaque it is but how bright it is, and that is a ramp, not a gate.
+    //
+    // So both floods are steep ramps of the luminance - a straight line through the middle
+    // of the range, saturated a fifth of the range away from that middle - and each is
+    // bounded only by the alpha, which a transparent pixel can never pass, so nothing is
+    // invented. The casing that used to be grown around the body is gone with the gate: at
+    // this size it closed the very gaps the report keeps asking about.
+    LABEL_FLOOD('white', '#fff', 'bright', 0.60, 'ink', true, 5) +
+    LABEL_FLOOD('blk', '#000', 'dark', 0.60, 'ink', true, 5) +
     '<feComposite in="blkm" in2="whitem" operator="out" result="outlinem"/>' +
     '<feFlood flood-color="#000" result="fk2"/>' +
     '<feComposite in="fk2" in2="outlinem" operator="in" result="black"/>' +
-    // The casing is a band of geometry, not of the drawing: it lies just outside the white
-    // body, where the service painted its halo or nothing at all. Gated on full opacity it
-    // fell away with the halo and left the digits with no edge against a pale roof.
-    LABEL_RING(1) +
-    LABEL_CONTRAST(1.3) +
-    // the drawing itself comes back only where the service drew it at full opacity, so the
-    // soft halo cannot return through this route either
-    '<feComposite in="crisp" in2="solid" operator="in" result="crisps"/>' +
-    // the casing first, then the outline, then the white: a digit's outline must never be
-    // covered by the white of the digit beside it
-    '<feMerge><feMergeNode in="casing"/><feMergeNode in="crisps"/>' +
-    '<feMergeNode in="black"/><feMergeNode in="white"/></feMerge>' +
+    // The service's own drawing, merged under the ink and not gated at all. A pixel that is
+    // neither bright enough for white nor dark enough for black is still the service's grey,
+    // not the map showing through: that is the rule of round 34 - a filter may add or
+    // recolour, but it may never drop what the service drew - and here it is also what
+    // keeps a one pixel stroke of a nine pixel digit continuous.
+    '<feComposite in="SourceGraphic" in2="ink" operator="in" result="crisps"/>' +
+    '<feMerge><feMergeNode in="crisps"/><feMergeNode in="black"/>' +
+    '<feMergeNode in="white"/></feMerge>' +
     '</filter>' +
     // The boundary names. The service draws a dark name on a fat white halo - and five
     // rounds of making those letters white failed for a reason that is in the drawing: a

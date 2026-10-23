@@ -155,17 +155,18 @@ module.exports = async function layers(report) {
   // change nothing on the map. Measured on such a stretch: of a nine pixel number only
   // fourteen pixels keep an alpha of 1, and in the gap between two digits the alpha never
   // falls below a half, so no gate can open the gap the report keeps asking about.
-  report.check('the parcel numbers are drawn at one image pixel per pixel of the map',
+  report.check('the parcel numbers are stretched exactly twice, by a request nothing shrinks',
     (() => {
       if (!env.internals.layers) return false;
       const definition = env.internals.layers['Geoportal - podział adm']?.definition;
       const companion = definition?.options?.companion;
       const cell = companion?.tileSize;
       const cap = env.internals.MAX_VIEW_PIXELS;
-      return env.internals.LABEL_NUMBER_MAGNIFY === 1 &&
-        companion?.magnify === 1 &&
-        // the whole cell fits inside the megapixel cap, so the request is never shrunk
-        Number.isFinite(cell) && cell * cell <= cap &&
+      const magnify = env.internals.LABEL_NUMBER_MAGNIFY;
+      return magnify === 2 && companion?.magnify === magnify &&
+        Number.isFinite(cell) && cell % magnify === 0 &&
+        // the whole request fits inside the megapixel cap, so it is never shrunk
+        (cell / magnify) * (cell / magnify) <= cap &&
         cell < env.internals.LABEL_CELL;
     })(),
     `numbers ${env.internals.LABEL_NUMBER_MAGNIFY}x in a ${env.internals.LABEL_NUMBER_CELL} px cell ` +
@@ -173,13 +174,44 @@ module.exports = async function layers(report) {
     `${env.internals.LABEL_CELL} px`);
   // The white of a digit is cut above the soft shoulder the service paints around a stroke:
   // at a half that shoulder turned white and closed the gap between two digits.
-  report.check('the body of a digit is cut above the service\'s soft shoulder',
+  // Round 41: at nine pixels a digit has no opaque core at all - measured, only 46 % of
+  // its ink reaches alpha 0.75 - so the gate of rounds 36-40 deleted more than half of
+  // every glyph and left a scattering of pixels. Both floods are now steep RAMPS of the
+  // luminance, bounded only by the alpha, and the drawing itself is merged underneath.
+  report.check('both floods of a number are steep ramps, never steps',
+    (() => {
+      if (!numerals) return false;
+      const steps = [...numerals.querySelectorAll('feFuncA')]
+        .filter(node => node.getAttribute('type') === 'discrete');
+      const slope = name => Number(funcOf(numerals, name)?.getAttribute('slope'));
+      return steps.length === 0 && slope('whitea') >= 3 && slope('blka') <= -3;
+    })(),
+    'no discrete step anywhere; the white rises at 5 and the dark falls at 5');
+  report.check('the white ramp crosses its half above the service\'s soft shoulder',
     (() => {
       if (!numerals) return false;
       const cut = cutAt(numerals, 'whitea');
-      return cut >= 0.6 && cut <= 0.72;
+      return cut >= 0.55 && cut <= 0.68;
     })(),
-    'white kept only above 0.6 of the luminance, inside the full-opacity gate');
+    'a half at 0.55-0.68 of the luminance');
+  report.check('a number keeps every pixel the service drew, and no ink is invented',
+    (() => {
+      if (!numerals) return false;
+      const inkGate = transfer(numerals, 'ink')?.querySelector('feFuncA');
+      const gateOf = name => [...numerals.querySelectorAll('feComposite')]
+        .filter(c => c.getAttribute('result') === name)
+        .map(c => c.getAttribute('in2'));
+      const order = merged(numerals);
+      return !!inkGate && inkGate.getAttribute('type') === 'linear' &&
+        Number(inkGate.getAttribute('slope')) >= 2 &&
+        // both floods are bounded by the alpha, so a transparent pixel is never inked
+        gateOf('whitem').includes('ink') && gateOf('blkm').includes('ink') &&
+        // the service's own drawing is merged, ungated, under them
+        order.length === 3 && order[0] === 'crisps' && order[1] === 'black' &&
+        order[order.length - 1] === 'white' &&
+        [...numerals.querySelectorAll('feComposite')].every(c => c.getAttribute('in2') !== 'solid');
+    })(),
+    'ink = alpha doubled; the white and the dark bounded by it, the drawing merged underneath');
   report.check('the lines are taken by their colour and flooded pure white, on top of the drawing',
     (() => {
       if (!ink) return false;
@@ -191,64 +223,34 @@ module.exports = async function layers(report) {
         order.length === 2 && order[0] === 'SourceGraphic' && order[1] === 'bluew';
     })(),
     'blue minus red, a hard cut, a flood of #fff merged over the untouched drawing');
-  // Round 36: the service draws a number twice over - the glyph at full opacity, and a
-  // soft white halo around it at about 40 %. Flooding the bright side promotes the halo
-  // to the same white as the glyph: that is the glow, and that is what merges the digits.
-  // The alpha channel is the only thing that separates them, so the white of a number is
-  // bounded by `solid` - what the service drew at full opacity.
-  report.check('the white of a number is inked only where the service drew it at full opacity',
+  // Round 38/41: what keeps two digits apart is a dark line drawn where the dark side of
+  // the luminance runs and the white does not - not a casing grown around the body, which
+  // at nine pixels closed the very gaps it was meant to open.
+  report.check('two digits are held apart by the dark that the white does not cover',
     (() => {
       if (!numerals) return false;
-      const solid = transfer(numerals, 'solid');
-      const table = solid?.querySelector('feFuncA')?.getAttribute('tableValues');
-      // a discrete step that keeps only the top of the alpha range
-      const gated = [...numerals.querySelectorAll('feComposite')]
-        .filter(c => c.getAttribute('in2') === 'solid');
+      const outline = [...numerals.querySelectorAll('feComposite')]
+        .find(c => c.getAttribute('result') === 'outlinem');
       const order = merged(numerals);
-      return table === '0 0 0 1' &&
-        gated.some(c => c.getAttribute('result') === 'whitem') &&
-        gated.some(c => c.getAttribute('result') === 'crisps') &&
-        // no dark mask is merged: the service's outline is the glyph's own shape
-        order.includes('black') && order[order.length - 1] === 'white';
+      return !!outline && outline.getAttribute('in') === 'blkm' &&
+        outline.getAttribute('in2') === 'whitem' && outline.getAttribute('operator') === 'out' &&
+        // the outline is drawn under the white, so it never crosses a digit itself
+        order.indexOf('black') < order.lastIndexOf('white') &&
+        // and nothing is grown out of the white mask: no geometry is added to the drawing
+        numerals.querySelector('feMorphology') === null;
     })(),
-    'solid = alpha >= 3/4; the white body and the drawing that comes back are bounded by it');
-  // Round 38/39: the outline and the casing are strokes one pixel wide, drawn at about
-  // half opacity. The coverage ramp is zero there (its knee is at three quarters), so the
-  // dark mask lost the outline itself; and the casing is geometry, grown out of the white
-  // mask - it lies outside the drawing altogether, where there is nothing to be gated on.
-  report.check('the dark outline and the casing survive a stroke thinner than full opacity',
-    (() => {
-      if (!numerals) return false;
-      const ink = transfer(numerals, 'ink')?.querySelector('feFuncA');
-      const gateOf = name => [...numerals.querySelectorAll('feComposite')]
-        .filter(c => c.getAttribute('result') === name)
-        .map(c => c.getAttribute('in2'));
-      const order = merged(numerals);
-      return !!ink && ink.getAttribute('type') === 'linear' &&
-        Number(ink.getAttribute('slope')) >= 2 &&
-        // the dark mask is bounded by that doubling, not by full opacity
-        gateOf('blkm').includes('ink') && !gateOf('blkm').includes('solid') &&
-        // the casing is grown geometry: flood over the ring itself, with no gate
-        [...numerals.querySelectorAll('feComposite')]
-          .some(c => c.getAttribute('result') === 'casing' && c.getAttribute('in2') === 'ring0') &&
-        // and both still work on their own discrete cut of the luminance
-        transfer(numerals, 'blkb') !== null &&
-        [...numerals.querySelectorAll('feComposite')]
-          .some(c => c.getAttribute('result') === 'outlinem' &&
-            c.getAttribute('in') === 'blkm' && c.getAttribute('in2') === 'whitem' &&
-            c.getAttribute('operator') === 'out') &&
-        order.includes('black');
-    })(),
-    'ink = alpha doubled; dark mask bounded by it, casing drawn straight from the ring');
+    'outlinem = blkm out whitem, merged of black under white, with no grown casing');
   report.check('the numerals are given more contrast without losing their shape',
     (() => {
       if (!numerals) return false;
-      const crisp = transfer(numerals, 'crisp');
-      const f = crisp && crisp.querySelector('feFuncR');
-      const slope = f && Number(f.getAttribute('slope'));
-      return !!f && f.getAttribute('type') === 'linear' && slope > 1 && slope <= 3;
+      // Round 41: the contrast is in the two ramps themselves - a slope of five saturates
+      // a fifth of the range from the cut, so a glyph is crisp without the drawing being
+      // cut into shapes. There is no separate stretch of the drawing any more.
+      const slope = name => Number(funcOf(numerals, name)?.getAttribute('slope'));
+      return slope('whitea') >= 3 && slope('blka') <= -3 &&
+        transfer(numerals, 'crisp') === undefined;
     })(),
-    'a linear stretch of the drawing, not a cut');
+    'a steep linear ramp of the luminance, not a cut');
   report.check('no key of the ink turns on the colour of the map in the numerals layer',
     !numerals || ![...numerals.querySelectorAll('feColorMatrix')]
       .some(m => (m.getAttribute('values') || '').trim().split(/\s+/).slice(15, 18)
